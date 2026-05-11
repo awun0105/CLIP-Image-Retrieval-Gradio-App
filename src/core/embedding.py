@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from threading import RLock
+from threading import Lock, RLock
 from typing import Any, cast
 
 import numpy as np
@@ -42,6 +42,7 @@ class EmbeddingService:
         self._model: CLIPModel | None = None
         self._tokenizer: CLIPTokenizer | None = None
         self._processor: CLIPProcessor | None = None
+        self._init_lock = Lock()
         self._inference_lock = RLock()
 
     @property
@@ -55,14 +56,17 @@ class EmbeddingService:
     def _ensure_loaded(self) -> None:
         if self._model is not None:
             return
-        logger.info("Loading CLIP model %s on %s", self.settings.model_id, self.device)
-        model_cls = cast(Any, CLIPModel)
-        model = cast(Any, model_cls.from_pretrained(self.settings.model_id))
-        model.to(self.device)
-        model.eval()
-        self._model = cast(CLIPModel, model)
-        self._tokenizer = CLIPTokenizer.from_pretrained(self.settings.model_id)
-        self._processor = CLIPProcessor.from_pretrained(self.settings.model_id)
+        with self._init_lock:
+            if self._model is not None:
+                return
+            logger.info("Loading CLIP model %s on %s", self.settings.model_id, self.device)
+            model_cls = cast(Any, CLIPModel)
+            model = cast(Any, model_cls.from_pretrained(self.settings.model_id))
+            model.to(self.device)
+            model.eval()
+            self._model = cast(CLIPModel, model)
+            self._tokenizer = CLIPTokenizer.from_pretrained(self.settings.model_id)
+            self._processor = CLIPProcessor.from_pretrained(self.settings.model_id)
 
     @torch.no_grad()
     def get_text_features(self, text: str) -> np.ndarray:

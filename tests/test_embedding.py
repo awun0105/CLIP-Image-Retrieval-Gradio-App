@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from unittest.mock import MagicMock, patch
 
 import numpy as np
@@ -36,6 +37,28 @@ def test_ensure_loaded_calls_transformers_factories():
             MockModel.from_pretrained.return_value
         )
         service._ensure_loaded()
+
+        MockModel.from_pretrained.assert_called_once_with(settings.model_id)
+        MockTok.from_pretrained.assert_called_once_with(settings.model_id)
+        MockProc.from_pretrained.assert_called_once_with(settings.model_id)
+
+    assert service.is_loaded is True
+
+
+def test_ensure_loaded_is_thread_safe():
+    settings = Settings(device="cpu")
+    service = EmbeddingService(settings)
+    with (
+        patch("core.embedding.CLIPModel") as MockModel,
+        patch("core.embedding.CLIPTokenizer") as MockTok,
+        patch("core.embedding.CLIPProcessor") as MockProc,
+    ):
+        MockModel.from_pretrained.return_value.to.return_value = (
+            MockModel.from_pretrained.return_value
+        )
+
+        with ThreadPoolExecutor(max_workers=8) as executor:
+            list(executor.map(lambda _i: service._ensure_loaded(), range(16)))
 
         MockModel.from_pretrained.assert_called_once_with(settings.model_id)
         MockTok.from_pretrained.assert_called_once_with(settings.model_id)
