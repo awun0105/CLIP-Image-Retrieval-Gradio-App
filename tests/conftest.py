@@ -50,6 +50,9 @@ def fake_embedding_service():
         def get_image_features(self, image) -> np.ndarray:
             return self._vec(f"image:{id(image)}")
 
+        def get_image_batch_features(self, images) -> np.ndarray:
+            return np.vstack([self.get_image_features(image).flatten() for image in images])
+
     return FakeEmbedding()
 
 

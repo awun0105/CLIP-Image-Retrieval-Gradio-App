@@ -79,7 +79,11 @@ class MigrationService:
         captions = self._load_captions()
         keys = [f"images/{Path(p).name}" for p in df["image_path"]]
         self.vector_store.upsert_batch(keys, embeds, captions)
-        logger.info("Upserted %d embeddings into Qdrant collection %s", len(keys), self.vector_store.collection_name)
+        logger.info(
+            "Upserted %d embeddings into Qdrant collection %s",
+            len(keys),
+            self.vector_store.collection_name,
+        )
         return len(keys)
 
     def migrate_all(self) -> dict:

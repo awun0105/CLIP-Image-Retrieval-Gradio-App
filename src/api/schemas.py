@@ -30,6 +30,11 @@ class IndexRequest(BaseModel):
 
 class IndexResponse(BaseModel):
     indexed_count: int
+    updated_count: int = 0
+    skipped_count: int = 0
+    uploaded_only_count: int = 0
+    failed_count: int = 0
+    scanned_count: int = 0
     collection_info: dict
 
 

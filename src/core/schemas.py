@@ -31,3 +31,15 @@ class CollectionInfo:
     vectors_count: int
     points_count: int
     status: str
+
+
+@dataclass
+class IndexingStats:
+    """Counters produced by an indexing run."""
+
+    scanned_count: int = 0
+    indexed_count: int = 0
+    updated_count: int = 0
+    skipped_count: int = 0
+    uploaded_only_count: int = 0
+    failed_count: int = 0

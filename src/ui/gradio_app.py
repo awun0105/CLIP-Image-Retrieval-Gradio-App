@@ -80,9 +80,7 @@ def build_ui(
         with gr.Column():
             with gr.Row(equal_height=True):
                 search_type = gr.Radio(choices=["Text", "Image"], label="Search by", value="Text")
-                top_k_slider = gr.Slider(
-                    label="Top K", minimum=1, maximum=50, step=1, value=5
-                )
+                top_k_slider = gr.Slider(label="Top K", minimum=1, maximum=50, step=1, value=5)
             with gr.Column(visible=True) as text_input:
                 text = gr.Textbox(label="Text", placeholder="Enter text to search")
             with gr.Column(visible=False) as image_input:

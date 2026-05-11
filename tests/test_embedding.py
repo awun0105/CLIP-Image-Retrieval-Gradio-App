@@ -32,7 +32,9 @@ def test_ensure_loaded_calls_transformers_factories():
         patch("core.embedding.CLIPTokenizer") as MockTok,
         patch("core.embedding.CLIPProcessor") as MockProc,
     ):
-        MockModel.from_pretrained.return_value.to.return_value = MockModel.from_pretrained.return_value
+        MockModel.from_pretrained.return_value.to.return_value = (
+            MockModel.from_pretrained.return_value
+        )
         service._ensure_loaded()
 
         MockModel.from_pretrained.assert_called_once_with(settings.model_id)

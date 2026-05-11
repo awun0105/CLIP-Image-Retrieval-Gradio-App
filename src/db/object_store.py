@@ -36,9 +36,7 @@ class ObjectStore:
     def upload_file(self, file_path: str, object_key: str) -> None:
         self.client.fput_object(self.bucket, object_key, file_path)
 
-    def upload_bytes(
-        self, data: bytes, object_key: str, content_type: str = "image/jpeg"
-    ) -> None:
+    def upload_bytes(self, data: bytes, object_key: str, content_type: str = "image/jpeg") -> None:
         self.client.put_object(
             self.bucket,
             object_key,

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from typing import Annotated
 
 from fastapi import APIRouter, Depends
 
@@ -25,10 +26,10 @@ router = APIRouter(tags=["health"])
 
 @router.get("/health", response_model=HealthResponse)
 def health(
-    embedding_service: EmbeddingService = Depends(get_embedding_service),
-    vector_store: VectorStore = Depends(get_vector_store),
-    object_store: ObjectStore = Depends(get_object_store),
-    settings: Settings = Depends(get_settings),
+    embedding_service: Annotated[EmbeddingService, Depends(get_embedding_service)],
+    vector_store: Annotated[VectorStore, Depends(get_vector_store)],
+    object_store: Annotated[ObjectStore, Depends(get_object_store)],
+    settings: Annotated[Settings, Depends(get_settings)],
 ) -> HealthResponse:
     qdrant_info: dict | None
     try:

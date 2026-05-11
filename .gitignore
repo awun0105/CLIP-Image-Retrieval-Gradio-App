@@ -33,3 +33,12 @@ env/
 qdrant_data/
 minio_data/
 hf_cache/
+
+.agents/
+.codex/
+
+Dataset/
+
+docs/plans/source-analysis.md
+
+docs/QA.md

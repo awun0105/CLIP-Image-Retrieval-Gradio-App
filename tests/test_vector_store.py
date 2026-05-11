@@ -42,9 +42,7 @@ def test_upsert_is_idempotent(vector_store):
 
 def test_delete_collection(vector_store):
     rng = np.random.default_rng(9)
-    vector_store.upsert_batch(
-        ["images/x.jpg"], rng.random((1, 512)).astype(np.float32)
-    )
+    vector_store.upsert_batch(["images/x.jpg"], rng.random((1, 512)).astype(np.float32))
     vector_store.delete_collection()
     vector_store._ensure_collection()
     assert vector_store.get_collection_info()["points_count"] == 0

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from threading import RLock
 
 import numpy as np
 import torch
@@ -40,6 +41,7 @@ class EmbeddingService:
         self._model: CLIPModel | None = None
         self._tokenizer: CLIPTokenizer | None = None
         self._processor: CLIPProcessor | None = None
+        self._inference_lock = RLock()
 
     @property
     def device(self) -> str:
@@ -63,14 +65,28 @@ class EmbeddingService:
     def get_text_features(self, text: str) -> np.ndarray:
         self._ensure_loaded()
         assert self._tokenizer is not None and self._model is not None
-        inputs = self._tokenizer(text, return_tensors="pt").to(self.device)
-        output = self._model.get_text_features(**inputs)
+        with self._inference_lock:
+            inputs = self._tokenizer(text, return_tensors="pt").to(self.device)
+            output = self._model.get_text_features(**inputs)
         return _as_tensor(output).cpu().numpy()
 
     @torch.no_grad()
     def get_image_features(self, image) -> np.ndarray:
         self._ensure_loaded()
         assert self._processor is not None and self._model is not None
-        inputs = self._processor(images=image, return_tensors="pt").to(self.device)
-        output = self._model.get_image_features(**inputs)
+        with self._inference_lock:
+            inputs = self._processor(images=image, return_tensors="pt").to(self.device)
+            output = self._model.get_image_features(**inputs)
+        return _as_tensor(output).cpu().numpy()
+
+    @torch.no_grad()
+    def get_image_batch_features(self, images: list) -> np.ndarray:
+        """Encode multiple images in a single CLIP forward pass."""
+        if not images:
+            return np.empty((0, 512), dtype=np.float32)
+        self._ensure_loaded()
+        assert self._processor is not None and self._model is not None
+        with self._inference_lock:
+            inputs = self._processor(images=images, return_tensors="pt").to(self.device)
+            output = self._model.get_image_features(**inputs)
         return _as_tensor(output).cpu().numpy()
