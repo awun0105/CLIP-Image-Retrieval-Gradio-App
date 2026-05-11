@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import json
 import logging
-from collections.abc import Sequence
+from collections.abc import Iterable, Iterator, Sequence
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from hashlib import sha256
 from pathlib import Path
@@ -25,7 +26,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 _IMAGE_EXTS = {".jpg", ".jpeg", ".png"}
-INGEST_BATCH_SIZE = 32
 STATE_LOOKUP_BATCH_SIZE = 512
 
 
@@ -34,7 +34,6 @@ class _PendingImage:
     path: Path
     object_key: str
     metadata: dict
-    minio_exists: bool
     is_update: bool
 
 
@@ -65,19 +64,25 @@ class IndexingService:
             with open(self.settings.captions_path) as f:
                 captions = json.load(f)
 
-        image_files = [p for p in images_dir.iterdir() if p.suffix.lower() in _IMAGE_EXTS]
-
-        stats = IndexingStats(scanned_count=len(image_files))
-        minio_keys = self._load_minio_keys()
+        stats = IndexingStats()
         pending: list[_PendingImage] = []
-        with tqdm(total=len(image_files), desc="Encoding & uploading images") as progress:
-            for chunk in self._chunks(image_files, STATE_LOOKUP_BATCH_SIZE):
+        with tqdm(desc="Encoding & uploading images", unit="image") as progress:
+            for chunk in self._chunks(self._iter_image_files(images_dir), STATE_LOOKUP_BATCH_SIZE):
                 chunk_items: list[tuple[Path, str, dict]] = []
                 for img_path in chunk:
+                    stats.scanned_count += 1
                     try:
                         object_key = f"images/{img_path.name}"
                         chunk_items.append(
-                            (img_path, object_key, self._metadata_for_file(img_path, object_key))
+                            (
+                                img_path,
+                                object_key,
+                                self._metadata_for_file(
+                                    img_path,
+                                    object_key,
+                                    include_hash=False,
+                                ),
+                            )
                         )
                     except Exception as exc:
                         logger.warning("Failed to inspect %s: %s", img_path, exc)
@@ -91,14 +96,28 @@ class IndexingService:
                 for img_path, object_key, metadata in chunk_items:
                     try:
                         payload = payloads.get(object_key)
-                        minio_exists = object_key in minio_keys
 
-                        if payload and payload.get("content_hash") == metadata["content_hash"]:
-                            if minio_exists:
+                        if (
+                            self.settings.index_fast_metadata_skip
+                            and payload
+                            and self._fast_metadata_matches(payload, metadata)
+                        ):
+                            if not self._needs_object_repair(object_key):
                                 stats.skipped_count += 1
                                 continue
                             self.object_store.upload_file(str(img_path), object_key)
-                            minio_keys.add(object_key)
+                            stats.uploaded_only_count += 1
+                            continue
+
+                        metadata = {
+                            **metadata,
+                            "content_hash": self._sha256_file(img_path),
+                        }
+                        if payload and payload.get("content_hash") == metadata["content_hash"]:
+                            if not self._needs_object_repair(object_key):
+                                stats.skipped_count += 1
+                                continue
+                            self.object_store.upload_file(str(img_path), object_key)
                             stats.uploaded_only_count += 1
                             continue
 
@@ -107,12 +126,11 @@ class IndexingService:
                                 path=img_path,
                                 object_key=object_key,
                                 metadata=metadata,
-                                minio_exists=minio_exists,
                                 is_update=payload is not None,
                             )
                         )
-                        if len(pending) >= INGEST_BATCH_SIZE:
-                            self._flush_pending(pending, captions, stats, minio_keys)
+                        if len(pending) >= self.settings.ingest_batch_size:
+                            self._flush_pending(pending, captions, stats)
                             pending = []
                     except Exception as exc:
                         logger.warning("Failed to process %s: %s", img_path, exc)
@@ -121,7 +139,7 @@ class IndexingService:
                         progress.update(1)
 
         if pending:
-            self._flush_pending(pending, captions, stats, minio_keys)
+            self._flush_pending(pending, captions, stats)
 
         logger.info(
             "Indexing finished for %s: scanned=%d indexed=%d updated=%d skipped=%d "
@@ -136,16 +154,24 @@ class IndexingService:
         )
         return stats
 
-    def _metadata_for_file(self, img_path: Path, object_key: str) -> dict:
+    def _metadata_for_file(
+        self,
+        img_path: Path,
+        object_key: str,
+        *,
+        include_hash: bool = True,
+    ) -> dict:
         stat = img_path.stat()
-        return {
-            "content_hash": self._sha256_file(img_path),
+        metadata = {
             "file_size": stat.st_size,
             "modified_at": stat.st_mtime,
             "source_path": str(img_path),
             "image_path": object_key,
             "filename": img_path.name,
         }
+        if include_hash:
+            metadata["content_hash"] = self._sha256_file(img_path)
+        return metadata
 
     @staticmethod
     def _sha256_file(path: Path) -> str:
@@ -155,25 +181,40 @@ class IndexingService:
                 digest.update(chunk)
         return digest.hexdigest()
 
-    def _load_minio_keys(self) -> set[str]:
-        try:
-            return set(self.object_store.list_objects(prefix="images/"))
-        except Exception as exc:
-            logger.warning(
-                "Failed to list MinIO objects, falling back to per-object checks: %s", exc
-            )
-            return set()
+    @staticmethod
+    def _fast_metadata_matches(payload: dict, metadata: dict) -> bool:
+        return (
+            payload.get("file_size") == metadata["file_size"]
+            and payload.get("modified_at") == metadata["modified_at"]
+        )
+
+    def _needs_object_repair(self, object_key: str) -> bool:
+        return self.settings.index_repair_missing_objects and not self.object_store.object_exists(
+            object_key
+        )
 
     @staticmethod
-    def _chunks(items: Sequence[Path], size: int) -> list[Sequence[Path]]:
-        return [items[i : i + size] for i in range(0, len(items), size)]
+    def _iter_image_files(images_dir: Path) -> Iterator[Path]:
+        for path in images_dir.iterdir():
+            if path.suffix.lower() in _IMAGE_EXTS:
+                yield path
+
+    @staticmethod
+    def _chunks(items: Iterable[Path], size: int) -> Iterator[list[Path]]:
+        chunk: list[Path] = []
+        for item in items:
+            chunk.append(item)
+            if len(chunk) >= size:
+                yield chunk
+                chunk = []
+        if chunk:
+            yield chunk
 
     def _flush_pending(
         self,
         pending: Sequence[_PendingImage],
         captions: dict[str, str],
         stats: IndexingStats,
-        minio_keys: set[str],
     ) -> None:
         images = []
         valid: list[_PendingImage] = []
@@ -190,23 +231,30 @@ class IndexingService:
             return
 
         embeddings = self.embedding.get_image_batch_features(images)
-        object_keys: list[str] = []
-        vectors: list[np.ndarray] = []
-        metadata_by_key: dict[str, dict] = {}
-        successful_items: list[_PendingImage] = []
+        successful: list[tuple[int, _PendingImage, np.ndarray]] = []
+        workers = max(1, min(self.settings.minio_upload_workers, len(valid)))
 
-        for item, emb in zip(valid, embeddings, strict=False):
-            try:
-                if item.is_update or not item.minio_exists:
-                    self.object_store.upload_file(str(item.path), item.object_key)
-                    minio_keys.add(item.object_key)
-                object_keys.append(item.object_key)
-                vectors.append(np.asarray(emb).flatten())
-                metadata_by_key[item.object_key] = item.metadata
-                successful_items.append(item)
-            except Exception as exc:
-                logger.warning("Failed to upload %s: %s", item.path, exc)
-                stats.failed_count += 1
+        def _upload(index: int, item: _PendingImage, emb: np.ndarray) -> tuple[int, _PendingImage, np.ndarray]:
+            self.object_store.upload_file(str(item.path), item.object_key)
+            return index, item, emb
+
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            futures = [
+                executor.submit(_upload, index, item, emb)
+                for index, (item, emb) in enumerate(zip(valid, embeddings, strict=False))
+            ]
+            for future in as_completed(futures):
+                try:
+                    successful.append(future.result())
+                except Exception as exc:
+                    logger.warning("Failed to upload indexed image: %s", exc)
+                    stats.failed_count += 1
+
+        successful.sort(key=lambda result: result[0])
+        object_keys = [item.object_key for _index, item, _emb in successful]
+        vectors = [np.asarray(emb).flatten() for _index, _item, emb in successful]
+        metadata_by_key = {item.object_key: item.metadata for _index, item, _emb in successful}
+        successful_items = [item for _index, item, _emb in successful]
 
         if not object_keys:
             return

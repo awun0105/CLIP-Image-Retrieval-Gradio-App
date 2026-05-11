@@ -33,6 +33,12 @@ class Settings(BaseSettings):
     qdrant_full_scan_threshold: int = 5000
     search_mode_default: str = "ann"
 
+    # Indexing performance
+    ingest_batch_size: int = 32
+    minio_upload_workers: int = 8
+    index_fast_metadata_skip: bool = True
+    index_repair_missing_objects: bool = True
+
     # MinIO
     minio_endpoint: str = "localhost:9000"
     minio_access_key: str = "minioadmin"
