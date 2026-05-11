@@ -286,6 +286,10 @@ All settings come from environment variables (and an optional `.env`). See
 | `QDRANT_INDEXING_THRESHOLD` | `5000` | Build vector indexes for smaller Qdrant segments than the default |
 | `QDRANT_FULL_SCAN_THRESHOLD` | `5000` | Prefer HNSW over full-scan for more segment searches |
 | `SEARCH_MODE_DEFAULT` | `ann` | Default mode: `ann`, `exact`, or `ann_indexed_only` |
+| `INGEST_BATCH_SIZE` | `32` | Images encoded/upserted per indexing batch |
+| `MINIO_UPLOAD_WORKERS` | `8` | Max concurrent MinIO uploads during indexing |
+| `INDEX_FAST_METADATA_SKIP` | `true` | Skip unchanged files using size/mtime before hashing |
+| `INDEX_REPAIR_MISSING_OBJECTS` | `true` | Stat MinIO objects for unchanged payloads and re-upload missing files |
 | `MINIO_ENDPOINT` | `localhost:9000` | host:port |
 | `MINIO_BUCKET` | `fashion-images` | Bucket; auto-created on startup |
 | `API_HOST` / `API_PORT` | `0.0.0.0` / `8000` | uvicorn bind |
