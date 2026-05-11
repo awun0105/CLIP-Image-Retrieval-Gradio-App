@@ -1,4 +1,4 @@
-.PHONY: install dev sync lock run test lint format docker-build docker-up docker-down docker-logs migrate
+.PHONY: install dev sync lock run test lint format docker-build docker-up docker-down docker-logs migrate qdrant-index-config
 
 # --- Local development (uv) ---
 
@@ -43,3 +43,6 @@ docker-logs:
 
 migrate:
 	uv run python scripts/migrate_to_qdrant.py
+
+qdrant-index-config:
+	uv run python scripts/update_qdrant_index_config.py

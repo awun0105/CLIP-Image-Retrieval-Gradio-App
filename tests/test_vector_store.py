@@ -31,6 +31,27 @@ def test_upsert_and_search(vector_store):
     assert results[0]["score"] > results[1]["score"] - 1e-6
 
 
+def test_search_params_exact(vector_store):
+    params = vector_store._search_params("exact")
+    assert params.exact is True
+    assert params.hnsw_ef is None
+    assert params.indexed_only is False
+
+
+def test_search_params_ann(vector_store):
+    params = vector_store._search_params("ann", hnsw_ef=256)
+    assert params.exact is False
+    assert params.hnsw_ef == 256
+    assert params.indexed_only is False
+
+
+def test_search_params_ann_indexed_only(vector_store):
+    params = vector_store._search_params("ann_indexed_only", hnsw_ef=64)
+    assert params.exact is False
+    assert params.hnsw_ef == 64
+    assert params.indexed_only is True
+
+
 def test_upsert_is_idempotent(vector_store):
     rng = np.random.default_rng(7)
     keys = ["images/a.jpg"]

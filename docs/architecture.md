@@ -94,10 +94,13 @@ REST routes and the Gradio UI:
 ### Storage layer
 
 - **`VectorStore`** (Qdrant) creates the collection with `Distance.COSINE`,
-  `VectorParams(size=512)` and `HnswConfigDiff(m=32, ef_construct=200)`. Point
-  ids are `uuid5(NAMESPACE_URL, object_key)` so upserts are idempotent — the
-  same `image_path` always maps to the same point. Queries use `query_points`
-  with `SearchParams(hnsw_ef=128)`. Three modes are supported via
+  `VectorParams(size=512)`, `HnswConfigDiff(m=32, ef_construct=200,
+  full_scan_threshold=5000)`, and `OptimizersConfigDiff(indexing_threshold=5000)`.
+  Point ids are `uuid5(NAMESPACE_URL, object_key)` so upserts are idempotent —
+  the same `image_path` always maps to the same point. Queries use `query_points`
+  with explicit search modes: `ann` maps to HNSW/ANN when Qdrant has built the
+  index, `exact` maps to full exact cosine search, and `ann_indexed_only`
+  searches only indexed segments. Three connection modes are supported via
   `QDRANT_MODE`:
   - `memory`: pure in-process, great for tests.
   - `local`: file-backed at `QDRANT_PATH`.

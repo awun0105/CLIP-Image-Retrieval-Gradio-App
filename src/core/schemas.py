@@ -1,6 +1,15 @@
 """Internal dataclass schemas shared across the service layer."""
 
 from dataclasses import dataclass
+from enum import Enum
+
+
+class SearchMode(str, Enum):
+    """Supported vector search execution modes."""
+
+    ANN = "ann"
+    EXACT = "exact"
+    ANN_INDEXED_ONLY = "ann_indexed_only"
 
 
 @dataclass
@@ -28,9 +37,13 @@ class CollectionInfo:
     """Summary of a Qdrant collection."""
 
     name: str
-    vectors_count: int
+    indexed_vectors_count: int
     points_count: int
     status: str
+    vector_size: int | None = None
+    distance: str | None = None
+    segments_count: int | None = None
+    sample_has_vector: bool | None = None
 
 
 @dataclass

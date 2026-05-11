@@ -72,3 +72,7 @@ ignore = ["E501"]
 testpaths = ["tests"]
 asyncio_mode = "auto"
 pythonpath = ["src"]
+
+[[tool.mypy.overrides]]
+module = ["pandas.*", "tqdm", "tqdm.*"]
+ignore_missing_imports = true

@@ -7,7 +7,7 @@ import logging
 from concurrent.futures import ThreadPoolExecutor
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from PIL import Image
 from starlette.concurrency import run_in_threadpool
 
@@ -18,7 +18,7 @@ from api.schemas import (
     TextSearchRequest,
 )
 from core.image_service import ImageService
-from core.schemas import SearchResult
+from core.schemas import SearchMode, SearchResult
 from core.search import SearchService
 
 logger = logging.getLogger(__name__)
@@ -64,7 +64,12 @@ def search_by_text(
     image_service: Annotated[ImageService, Depends(get_image_service)],
 ) -> SearchResponse:
     try:
-        results = search_service.search_by_text(request.query, request.top_k)
+        results = search_service.search_by_text(
+            request.query,
+            request.top_k,
+            request.search_mode,
+            request.hnsw_ef,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return _to_response(results, image_service, request.query)
@@ -76,6 +81,8 @@ async def search_by_image(
     search_service: Annotated[SearchService, Depends(get_search_service)],
     image_service: Annotated[ImageService, Depends(get_image_service)],
     top_k: int = 5,
+    search_mode: SearchMode = SearchMode.ANN,
+    hnsw_ef: Annotated[int | None, Query(ge=32, le=512)] = None,
 ) -> SearchResponse:
     if top_k < 1 or top_k > 100:
         raise HTTPException(status_code=400, detail="top_k must be in [1, 100]")
@@ -84,5 +91,11 @@ async def search_by_image(
         image = await run_in_threadpool(_decode_image, data)
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Invalid image: {exc}") from exc
-    results = await run_in_threadpool(search_service.search_by_image, image, top_k)
+    results = await run_in_threadpool(
+        search_service.search_by_image,
+        image,
+        top_k,
+        search_mode,
+        hnsw_ef,
+    )
     return await run_in_threadpool(_to_response, results, image_service, None)

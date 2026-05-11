@@ -4,10 +4,14 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
+from core.schemas import SearchMode
+
 
 class TextSearchRequest(BaseModel):
     query: str = Field(..., min_length=1, max_length=500)
     top_k: int = Field(5, ge=1, le=100)
+    search_mode: SearchMode = SearchMode.ANN
+    hnsw_ef: int | None = Field(None, ge=32, le=512)
 
 
 class SearchResultItem(BaseModel):

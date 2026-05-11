@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from threading import RLock
+from typing import Any, cast
 
 import numpy as np
 import torch
@@ -55,9 +56,11 @@ class EmbeddingService:
         if self._model is not None:
             return
         logger.info("Loading CLIP model %s on %s", self.settings.model_id, self.device)
-        model = CLIPModel.from_pretrained(self.settings.model_id).to(self.device)
+        model_cls = cast(Any, CLIPModel)
+        model = cast(Any, model_cls.from_pretrained(self.settings.model_id))
+        model.to(self.device)
         model.eval()
-        self._model = model
+        self._model = cast(CLIPModel, model)
         self._tokenizer = CLIPTokenizer.from_pretrained(self.settings.model_id)
         self._processor = CLIPProcessor.from_pretrained(self.settings.model_id)
 

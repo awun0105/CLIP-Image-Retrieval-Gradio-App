@@ -41,30 +41,30 @@ def build_ui(
             )
         return urls, rows, f"Found {len(urls)} results"
 
-    def search_by_text(text: str, top_k: int):
+    def search_by_text(text: str, top_k: int, search_mode: str, hnsw_ef: int):
         if not text or not text.strip():
             return [], [], "Error: please enter a text query"
         try:
-            results = search_service.search_by_text(text, int(top_k))
+            results = search_service.search_by_text(text, int(top_k), search_mode, int(hnsw_ef))
         except Exception as exc:
             logger.exception("search_by_text failed")
             return [], [], f"Error: {exc}"
         return _resolve_results(results)
 
-    def search_by_image(image, top_k: int):
+    def search_by_image(image, top_k: int, search_mode: str, hnsw_ef: int):
         if image is None:
             return [], [], "Error: please upload an image"
         try:
-            results = search_service.search_by_image(image, int(top_k))
+            results = search_service.search_by_image(image, int(top_k), search_mode, int(hnsw_ef))
         except Exception as exc:
             logger.exception("search_by_image failed")
             return [], [], f"Error: {exc}"
         return _resolve_results(results)
 
-    def combined_search(search_type: str, text, image, top_k):
+    def combined_search(search_type: str, text, image, top_k, search_mode, hnsw_ef):
         if search_type == "Text":
-            return search_by_text(text, top_k)
-        return search_by_image(image, top_k)
+            return search_by_text(text, top_k, search_mode, hnsw_ef)
+        return search_by_image(image, top_k, search_mode, hnsw_ef)
 
     def on_select(evt: gr.SelectData, rows):
         if not rows or evt.index is None or evt.index >= len(rows):
@@ -81,6 +81,16 @@ def build_ui(
             with gr.Row(equal_height=True):
                 search_type = gr.Radio(choices=["Text", "Image"], label="Search by", value="Text")
                 top_k_slider = gr.Slider(label="Top K", minimum=1, maximum=50, step=1, value=5)
+                search_mode = gr.Dropdown(
+                    choices=[
+                        ("ANN", "ann"),
+                        ("Exact", "exact"),
+                        ("ANN indexed only", "ann_indexed_only"),
+                    ],
+                    label="Search mode",
+                    value="ann",
+                )
+                hnsw_ef = gr.Slider(label="HNSW ef", minimum=32, maximum=512, step=32, value=128)
             with gr.Column(visible=True) as text_input:
                 text = gr.Textbox(label="Text", placeholder="Enter text to search")
             with gr.Column(visible=False) as image_input:
@@ -111,7 +121,7 @@ def build_ui(
 
         search_btn.click(
             fn=combined_search,
-            inputs=[search_type, text, image, top_k_slider],
+            inputs=[search_type, text, image, top_k_slider, search_mode, hnsw_ef],
             outputs=[gallery, results_state, status],
         )
 

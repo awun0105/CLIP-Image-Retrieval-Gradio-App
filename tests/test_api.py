@@ -61,6 +61,8 @@ def test_health(client, fake_object_store):
     assert body["status"] == "ok"
     assert body["model_loaded"] is True
     assert body["minio_bucket"] == fake_object_store.bucket
+    assert "indexed_vectors_count" in body["qdrant"]
+    assert body["qdrant"]["sample_has_vector"] is True
 
 
 def test_search_text(client):
@@ -74,11 +76,26 @@ def test_search_text(client):
         assert item["image_url"].startswith("http://minio/images/")
 
 
+def test_search_text_with_exact_mode(client):
+    r = client.post(
+        "/api/v1/search/text",
+        json={"query": "blue shirt", "top_k": 2, "search_mode": "exact"},
+    )
+    assert r.status_code == 200
+    assert r.json()["total"] == 2
+
+
 def test_search_text_validation(client):
     r = client.post("/api/v1/search/text", json={"query": "", "top_k": 5})
     assert r.status_code == 422  # Pydantic min_length
 
     r = client.post("/api/v1/search/text", json={"query": "ok", "top_k": 0})
+    assert r.status_code == 422
+
+    r = client.post("/api/v1/search/text", json={"query": "ok", "search_mode": "bad"})
+    assert r.status_code == 422
+
+    r = client.post("/api/v1/search/text", json={"query": "ok", "hnsw_ef": 16})
     assert r.status_code == 422
 
 
@@ -91,7 +108,7 @@ def test_search_image(client):
     r = client.post(
         "/api/v1/search/image",
         files={"file": ("test.png", buf, "image/png")},
-        params={"top_k": 1},
+        params={"top_k": 1, "search_mode": "ann", "hnsw_ef": 64},
     )
     assert r.status_code == 200
     body = r.json()

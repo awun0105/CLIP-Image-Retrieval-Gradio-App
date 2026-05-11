@@ -10,12 +10,14 @@ from qdrant_client import QdrantClient
 from qdrant_client.models import (
     Distance,
     HnswConfigDiff,
+    OptimizersConfigDiff,
     PointStruct,
     SearchParams,
     VectorParams,
 )
 
 from config import Settings
+from core.schemas import SearchMode
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +52,14 @@ class VectorStore:
         self.client.create_collection(
             collection_name=self.collection_name,
             vectors_config=VectorParams(size=VECTOR_DIM, distance=Distance.COSINE),
-            hnsw_config=HnswConfigDiff(m=32, ef_construct=200),
+            hnsw_config=HnswConfigDiff(
+                m=32,
+                ef_construct=200,
+                full_scan_threshold=self.settings.qdrant_full_scan_threshold,
+            ),
+            optimizers_config=OptimizersConfigDiff(
+                indexing_threshold=self.settings.qdrant_indexing_threshold,
+            ),
         )
 
     @staticmethod
@@ -115,37 +124,126 @@ class VectorStore:
         if points:
             self.client.upsert(collection_name=self.collection_name, points=points)
 
-    def search(self, query_vector: np.ndarray, top_k: int = 5) -> list[dict]:
+    def _search_params(
+        self,
+        search_mode: SearchMode | str | None = None,
+        hnsw_ef: int | None = None,
+    ) -> SearchParams:
+        mode = SearchMode(search_mode or self.settings.search_mode_default)
+        if mode == SearchMode.EXACT:
+            return SearchParams(exact=True)
+
+        ef = hnsw_ef or self.settings.qdrant_hnsw_ef
+        return SearchParams(
+            exact=False,
+            hnsw_ef=ef,
+            indexed_only=mode == SearchMode.ANN_INDEXED_ONLY,
+        )
+
+    def search(
+        self,
+        query_vector: np.ndarray,
+        top_k: int = 5,
+        search_mode: SearchMode | str | None = None,
+        hnsw_ef: int | None = None,
+    ) -> list[dict]:
         response = self.client.query_points(
             collection_name=self.collection_name,
             query=np.asarray(query_vector).flatten().tolist(),
             limit=top_k,
             with_payload=True,
-            search_params=SearchParams(hnsw_ef=128),
+            search_params=self._search_params(search_mode, hnsw_ef),
         )
-        return [
-            {
-                "image_path": hit.payload["image_path"],
-                "caption": hit.payload.get("caption"),
-                "score": float(hit.score),
-                "filename": hit.payload.get("filename"),
-            }
-            for hit in response.points
-        ]
+        results: list[dict] = []
+        for hit in response.points:
+            payload = hit.payload or {}
+            results.append(
+                {
+                    "image_path": payload["image_path"],
+                    "caption": payload.get("caption"),
+                    "score": float(hit.score),
+                    "filename": payload.get("filename"),
+                }
+            )
+        return results
 
     def get_collection_info(self) -> dict:
         info = self.client.get_collection(self.collection_name)
-        vectors_count = getattr(info, "vectors_count", None)
-        if vectors_count is None:
-            vectors_count = getattr(info, "indexed_vectors_count", 0) or 0
+        indexed_vectors_count = getattr(info, "indexed_vectors_count", None)
+        if indexed_vectors_count is None:
+            indexed_vectors_count = getattr(info, "vectors_count", 0) or 0
         points_count = getattr(info, "points_count", 0) or 0
         status = info.status
+        config = getattr(info, "config", None)
+        params = getattr(config, "params", None)
+        vectors = getattr(params, "vectors", None)
         return {
             "name": self.collection_name,
-            "vectors_count": int(vectors_count),
+            "indexed_vectors_count": int(indexed_vectors_count),
             "points_count": int(points_count),
             "status": status.value if hasattr(status, "value") else str(status),
+            "vector_size": self._vector_size(vectors),
+            "distance": self._distance(vectors),
+            "segments_count": getattr(info, "segments_count", None),
+            "hnsw_config": self._model_dict(getattr(config, "hnsw_config", None)),
+            "optimizer_config": self._model_dict(getattr(config, "optimizer_config", None)),
+            "sample_has_vector": self._sample_has_vector(),
         }
 
     def delete_collection(self) -> None:
         self.client.delete_collection(self.collection_name)
+
+    def update_indexing_config(self) -> None:
+        """Apply configured HNSW/optimizer thresholds to an existing collection."""
+        self.client.update_collection(
+            collection_name=self.collection_name,
+            hnsw_config=HnswConfigDiff(
+                full_scan_threshold=self.settings.qdrant_full_scan_threshold,
+            ),
+            optimizers_config=OptimizersConfigDiff(
+                indexing_threshold=self.settings.qdrant_indexing_threshold,
+            ),
+        )
+
+    @staticmethod
+    def _model_dict(value) -> dict | None:
+        if value is None:
+            return None
+        if hasattr(value, "model_dump"):
+            return value.model_dump()
+        if hasattr(value, "dict"):
+            return value.dict()
+        return None
+
+    @staticmethod
+    def _vector_size(vectors) -> int | None:
+        if isinstance(vectors, dict):
+            vectors = next(iter(vectors.values()), None)
+        return getattr(vectors, "size", None)
+
+    @staticmethod
+    def _distance(vectors) -> str | None:
+        if isinstance(vectors, dict):
+            vectors = next(iter(vectors.values()), None)
+        distance = getattr(vectors, "distance", None)
+        if distance is None:
+            return None
+        return distance.value if hasattr(distance, "value") else str(distance)
+
+    def _sample_has_vector(self) -> bool | None:
+        try:
+            records, _ = self.client.scroll(
+                collection_name=self.collection_name,
+                limit=1,
+                with_payload=False,
+                with_vectors=True,
+            )
+        except Exception as exc:
+            logger.warning("Qdrant sample vector probe failed: %s", exc)
+            return None
+        if not records:
+            return False
+        vector = getattr(records[0], "vector", None)
+        if isinstance(vector, dict):
+            return any(value is not None for value in vector.values())
+        return vector is not None

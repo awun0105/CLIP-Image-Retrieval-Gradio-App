@@ -28,6 +28,10 @@ class Settings(BaseSettings):
     qdrant_url: str = "http://localhost:6333"
     qdrant_api_key: str | None = None
     qdrant_collection: str = "fashion_images"
+    qdrant_hnsw_ef: int = 128
+    qdrant_indexing_threshold: int = 5000
+    qdrant_full_scan_threshold: int = 5000
+    search_mode_default: str = "ann"
 
     # MinIO
     minio_endpoint: str = "localhost:9000"

@@ -5,7 +5,7 @@ Multimodal fashion retrieval service. A fine-tuned CLIP model
 
 - A **FastAPI** REST API (`/api/v1/...`, Swagger at `/docs`).
 - A **Gradio** web UI mounted at `/ui`.
-- A **Qdrant** vector database for HNSW cosine similarity search.
+- A **Qdrant** vector database for exact cosine and HNSW/ANN similarity search.
 - A **MinIO** S3-compatible object store for the image catalogue.
 
 Search by free-text caption ("vintage floral dress with puff sleeves") or by
@@ -224,6 +224,14 @@ to create the `.venv`.
 | `make lock` | `uv lock` | Regenerate `uv.lock` after editing `pyproject.toml` |
 | `make docker-up` / `make docker-down` | `docker compose up -d` / `down` | Full stack via Docker |
 | `make migrate` | `uv run python scripts/migrate_to_qdrant.py` | Upsert legacy embeddings |
+| `make qdrant-index-config` | `uv run python scripts/update_qdrant_index_config.py` | Apply HNSW/optimizer thresholds |
+
+To apply the configured Qdrant HNSW/optimizer thresholds to an existing
+collection without recreating it:
+
+```bash
+make qdrant-index-config
+```
 
 The test suite uses Qdrant in-memory mode and a MinIO mock, so it requires
 no external services.
@@ -255,8 +263,8 @@ pyproject.toml     # PEP-621 + uv lockfile (uv.lock)
 
 | Method | Path | Body | Description |
 |---|---|---|---|
-| `POST` | `/api/v1/search/text` | `{ "query": str, "top_k": int }` | Text → top-K image hits with presigned URLs |
-| `POST` | `/api/v1/search/image` | multipart `file=@...` + `?top_k=N` | Image → top-K similar images |
+| `POST` | `/api/v1/search/text` | `{ "query": str, "top_k": int, "search_mode"?: "ann" \| "exact" \| "ann_indexed_only", "hnsw_ef"?: int }` | Text → top-K image hits with presigned URLs |
+| `POST` | `/api/v1/search/image` | multipart `file=@...` + `?top_k=N&search_mode=ann&hnsw_ef=128` | Image → top-K similar images |
 | `POST` | `/api/v1/index/` | `{ "images_dir": str? }` | Encode + upload + upsert a directory of images |
 | `GET` | `/health` | — | Model + Qdrant + MinIO health |
 
@@ -274,6 +282,10 @@ All settings come from environment variables (and an optional `.env`). See
 | `QDRANT_MODE` | `memory` | `memory` / `local` / `remote` |
 | `QDRANT_URL` | `http://localhost:6333` | Used when `QDRANT_MODE=remote` |
 | `QDRANT_COLLECTION` | `fashion_images` | Qdrant collection name |
+| `QDRANT_HNSW_EF` | `128` | ANN search breadth; higher improves recall but costs latency |
+| `QDRANT_INDEXING_THRESHOLD` | `5000` | Build vector indexes for smaller Qdrant segments than the default |
+| `QDRANT_FULL_SCAN_THRESHOLD` | `5000` | Prefer HNSW over full-scan for more segment searches |
+| `SEARCH_MODE_DEFAULT` | `ann` | Default mode: `ann`, `exact`, or `ann_indexed_only` |
 | `MINIO_ENDPOINT` | `localhost:9000` | host:port |
 | `MINIO_BUCKET` | `fashion-images` | Bucket; auto-created on startup |
 | `API_HOST` / `API_PORT` | `0.0.0.0` / `8000` | uvicorn bind |
