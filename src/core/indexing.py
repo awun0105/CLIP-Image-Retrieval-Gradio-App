@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import json
 import logging
-from collections.abc import Iterable, Iterator, Sequence
+from collections.abc import Callable, Iterable, Iterator, Sequence
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
+from datetime import UTC, datetime
 from hashlib import sha256
 from pathlib import Path
+from threading import Lock
 from typing import TYPE_CHECKING
+from uuid import uuid4
 
 import numpy as np
 from PIL import Image
@@ -37,6 +40,22 @@ class _PendingImage:
     is_update: bool
 
 
+@dataclass
+class IndexingJob:
+    job_id: str
+    status: str
+    images_dir: str | None = None
+    stats: IndexingStats = field(default_factory=IndexingStats)
+    error: str | None = None
+    created_at: str | None = None
+    started_at: str | None = None
+    finished_at: str | None = None
+
+
+class IndexingJobAlreadyRunning(RuntimeError):
+    """Raised when a second indexing job is submitted while one is active."""
+
+
 class IndexingService:
     """End-to-end indexing of a local image directory."""
 
@@ -51,13 +70,97 @@ class IndexingService:
         self.vector_store = vector_store
         self.object_store = object_store
         self.settings = settings
+        self._job_lock = Lock()
+        self._jobs: dict[str, IndexingJob] = {}
+        self._job_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="indexing-job")
 
-    def index_directory(self, images_dir: Path | None = None) -> IndexingStats:
-        """Scan ``images_dir`` and incrementally ingest only new or changed images."""
+    def start_indexing_job(self, images_dir: Path | None = None) -> IndexingJob:
+        """Submit an indexing job to the in-process single-worker queue."""
+        images_dir = self._resolve_images_dir(images_dir)
+        with self._job_lock:
+            if self._active_job_id() is not None:
+                raise IndexingJobAlreadyRunning("An indexing job is already queued or running")
+            job_id = str(uuid4())
+            job = IndexingJob(
+                job_id=job_id,
+                status="queued",
+                images_dir=str(images_dir),
+                created_at=self._now(),
+            )
+            self._jobs[job_id] = job
+            self._job_executor.submit(self._run_indexing_job, job_id, images_dir)
+            return self._snapshot_job(job)
+
+    def get_indexing_job(self, job_id: str) -> IndexingJob | None:
+        with self._job_lock:
+            job = self._jobs.get(job_id)
+            if job is None:
+                return None
+            return self._snapshot_job(job)
+
+    def _run_indexing_job(self, job_id: str, images_dir: Path) -> None:
+        self._update_job(job_id, status="running", started_at=self._now())
+        try:
+            stats = self.index_directory(
+                images_dir,
+                on_progress=lambda current: self._update_job(job_id, stats=current),
+            )
+        except Exception as exc:
+            logger.exception("Indexing job %s failed", job_id)
+            self._update_job(job_id, status="failed", error=str(exc), finished_at=self._now())
+            return
+        self._update_job(job_id, status="completed", stats=stats, finished_at=self._now())
+
+    def _update_job(
+        self,
+        job_id: str,
+        *,
+        status: str | None = None,
+        stats: IndexingStats | None = None,
+        error: str | None = None,
+        started_at: str | None = None,
+        finished_at: str | None = None,
+    ) -> None:
+        with self._job_lock:
+            job = self._jobs[job_id]
+            if status is not None:
+                job.status = status
+            if stats is not None:
+                job.stats = replace(stats)
+            if error is not None:
+                job.error = error
+            if started_at is not None:
+                job.started_at = started_at
+            if finished_at is not None:
+                job.finished_at = finished_at
+
+    def _active_job_id(self) -> str | None:
+        for job_id, job in self._jobs.items():
+            if job.status in {"queued", "running"}:
+                return job_id
+        return None
+
+    @staticmethod
+    def _snapshot_job(job: IndexingJob) -> IndexingJob:
+        return replace(job, stats=replace(job.stats))
+
+    @staticmethod
+    def _now() -> str:
+        return datetime.now(UTC).isoformat()
+
+    def _resolve_images_dir(self, images_dir: Path | None = None) -> Path:
         images_dir = images_dir or self.settings.legacy_images_path
         if images_dir is None or not Path(images_dir).exists():
             raise FileNotFoundError(f"Images directory not found: {images_dir}")
-        images_dir = Path(images_dir)
+        return Path(images_dir)
+
+    def index_directory(
+        self,
+        images_dir: Path | None = None,
+        on_progress: Callable[[IndexingStats], None] | None = None,
+    ) -> IndexingStats:
+        """Scan ``images_dir`` and incrementally ingest only new or changed images."""
+        images_dir = self._resolve_images_dir(images_dir)
 
         captions: dict[str, str] = {}
         if self.settings.captions_path and self.settings.captions_path.exists():
@@ -132,14 +235,17 @@ class IndexingService:
                         if len(pending) >= self.settings.ingest_batch_size:
                             self._flush_pending(pending, captions, stats)
                             pending = []
+                            self._notify_progress(on_progress, stats)
                     except Exception as exc:
                         logger.warning("Failed to process %s: %s", img_path, exc)
                         stats.failed_count += 1
                     finally:
                         progress.update(1)
+                self._notify_progress(on_progress, stats)
 
         if pending:
             self._flush_pending(pending, captions, stats)
+            self._notify_progress(on_progress, stats)
 
         logger.info(
             "Indexing finished for %s: scanned=%d indexed=%d updated=%d skipped=%d "
@@ -153,6 +259,14 @@ class IndexingService:
             stats.failed_count,
         )
         return stats
+
+    @staticmethod
+    def _notify_progress(
+        on_progress: Callable[[IndexingStats], None] | None,
+        stats: IndexingStats,
+    ) -> None:
+        if on_progress is not None:
+            on_progress(replace(stats))
 
     def _metadata_for_file(
         self,

@@ -3,11 +3,15 @@
 from __future__ import annotations
 
 from pathlib import Path
+from threading import Event
+from time import sleep
 
 import numpy as np
+import pytest
 from PIL import Image
 
-from core.indexing import IndexingService
+from core.indexing import IndexingJobAlreadyRunning, IndexingService
+from core.schemas import IndexingStats
 
 
 class FakeObjectStore:
@@ -154,3 +158,46 @@ def test_index_directory_continues_after_upload_failure(settings, vector_store, 
     assert result.failed_count == 1
     assert vector_store.get_collection_info()["points_count"] == 1
     assert object_store.upload_calls == ["images/a.jpg"]
+
+
+def test_indexing_job_completes(settings, vector_store, tmp_path):
+    _write_image(tmp_path / "a.jpg", "red")
+    object_store = FakeObjectStore()
+    embedding = CountingEmbedding()
+    service = IndexingService(embedding, vector_store, object_store, settings)
+
+    job = service.start_indexing_job(tmp_path)
+
+    assert job.status == "queued"
+    for _ in range(50):
+        current = service.get_indexing_job(job.job_id)
+        assert current is not None
+        if current.status == "completed":
+            break
+        sleep(0.02)
+
+    current = service.get_indexing_job(job.job_id)
+    assert current is not None
+    assert current.status == "completed"
+    assert current.stats.indexed_count == 1
+    assert current.finished_at is not None
+
+
+def test_indexing_job_rejects_second_active_job(settings, vector_store, tmp_path):
+    _write_image(tmp_path / "a.jpg", "red")
+    object_store = FakeObjectStore()
+    embedding = CountingEmbedding()
+    service = IndexingService(embedding, vector_store, object_store, settings)
+    release = Event()
+
+    def slow_index_directory(_images_dir=None, on_progress=None):
+        release.wait(timeout=2)
+        return IndexingStats(scanned_count=1)
+
+    service.index_directory = slow_index_directory
+    service.start_indexing_job(tmp_path)
+
+    with pytest.raises(IndexingJobAlreadyRunning):
+        service.start_indexing_job(tmp_path)
+
+    release.set()

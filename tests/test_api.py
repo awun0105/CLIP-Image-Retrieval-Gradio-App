@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+from time import sleep
 
 import numpy as np
 import pytest
@@ -20,6 +21,7 @@ from api.dependencies import (
     get_vector_store,
 )
 from core.image_service import ImageService
+from core.indexing import IndexingService
 from core.search import SearchService
 
 
@@ -113,3 +115,40 @@ def test_search_image(client):
     assert r.status_code == 200
     body = r.json()
     assert body["total"] == 1
+
+
+def test_index_job_api(settings, vector_store, fake_embedding_service, fake_object_store, tmp_path):
+    img = Image.new("RGB", (8, 8), color="red")
+    img.save(tmp_path / "api_index.jpg")
+    indexing_service = IndexingService(
+        fake_embedding_service,
+        vector_store,
+        fake_object_store,
+        settings,
+    )
+
+    app = create_app()
+    app.dependency_overrides[get_settings] = lambda: settings
+    app.dependency_overrides[get_vector_store] = lambda: vector_store
+    app.dependency_overrides[get_object_store] = lambda: fake_object_store
+    app.dependency_overrides[get_indexing_service] = lambda: indexing_service
+    app.dependency_overrides[get_embedding_service] = lambda: fake_embedding_service
+
+    with TestClient(app) as c:
+        r = c.post("/api/v1/index/", json={"images_dir": str(tmp_path)})
+        assert r.status_code == 202
+        started = r.json()
+        assert started["status"] == "queued"
+        assert started["status_url"].startswith("/api/v1/index/")
+
+        for _ in range(50):
+            status = c.get(started["status_url"])
+            assert status.status_code == 200
+            body = status.json()
+            if body["status"] == "completed":
+                break
+            sleep(0.02)
+
+        assert body["status"] == "completed"
+        assert body["indexed_count"] == 1
+        assert body["scanned_count"] == 1
