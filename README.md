@@ -53,9 +53,12 @@ A multimodal search engine specialized for fashion, powered by AI. Search your p
 
 ## Table of Contents
 
-- [Why this Engine?](#why-this-engine)
-- [How it Works](#how-it-works)
-- [Tech Stack & Architecture](#tech-stack--architecture)
+- [Screenshots](#screenshots)
+- [Value Proposition](#value-proposition)
+- [Repository Structure](#repository-structure)
+- [Technical Architecture](#technical-architecture)
+- [System Workflow](#system-workflow)
+- [Component Breakdown](#component-breakdown)
 - [Quickstart Guide](#quickstart-guide)
 - [License](#license)
 
