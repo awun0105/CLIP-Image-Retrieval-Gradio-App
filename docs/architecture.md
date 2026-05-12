@@ -57,10 +57,10 @@ each subdirectory is an independently importable top-level package.
 | Path | Responsibility |
 |---|---|
 | `src/config.py` | `Settings` (pydantic-settings) — CLIP / Qdrant / MinIO / API / legacy paths from env + `.env`. |
-| `src/core/schemas.py` | Plain dataclasses passed between services: `SearchResult`, `ImageMeta`, `CollectionInfo`. |
-| `src/core/embedding.py` | `EmbeddingService` — lazy-loaded CLIP model with `@torch.no_grad()` text / image feature extraction. |
-| `src/core/search.py` | `SearchService` — coordinates `EmbeddingService` + `VectorStore`, validates input. |
-| `src/core/indexing.py` | `IndexingService` — scans a directory, encodes images, uploads to MinIO, upserts into Qdrant. |
+| `src/core/schemas.py` | Plain dataclasses passed between services: `SearchResult`, `ImageMeta`, `CollectionInfo`, `IndexingStats`. |
+| `src/core/embedding.py` | `EmbeddingService` — lazy-loaded CLIP model with **Inference Gating** to prioritize search over background indexing. |
+| `src/core/search.py` | `SearchService` — coordinates `EmbeddingService` + `VectorStore`, supports multiple search modes (ANN/Exact). |
+| `src/core/indexing.py` | `IndexingService` — **Incremental indexing** (Metadata + SHA256) of local directories into MinIO & Qdrant. |
 | `src/core/image_service.py` | `ImageService` — façade over `ObjectStore` returning presigned URLs and raw bytes. |
 | `src/db/vector_store.py` | `VectorStore` — Qdrant client wrapper (3 modes: memory / local / remote), HNSW cosine collection. |
 | `src/db/object_store.py` | `ObjectStore` — MinIO client wrapper scoped to a bucket. |
@@ -78,15 +78,16 @@ Four service classes encapsulate the domain logic and are reused by both the
 REST routes and the Gradio UI:
 
 - **`EmbeddingService`** owns the CLIP model. Loading is *lazy* — the model
-  files are downloaded and moved to GPU/CPU only on the first call to
-  `get_text_features` / `get_image_features`. This keeps process startup cheap
-  and lets the `/health` endpoint report `model_loaded=false` until real
-  traffic arrives.
+  files are downloaded and moved to GPU/CPU only on the first call. It
+  implements an **Inference Gate** using `threading.Condition` to ensure that
+  foreground search requests take precedence over background indexing tasks.
 - **`SearchService`** is the orchestrator for read traffic: validate input →
-  embed → query Qdrant → return `list[SearchResult]`.
-- **`IndexingService`** is the orchestrator for write traffic: walk a
-  directory, encode each image, upload it to MinIO, then upsert all vectors
-  into Qdrant in a single batched call.
+  embed → query Qdrant → return `list[SearchResult]`. It supports configurable
+  `hnsw_ef` and `SearchMode` (ANN, Exact, or ANN Indexed Only).
+- **`IndexingService`** is the orchestrator for write traffic. It implements
+  **Incremental Indexing**: it first checks metadata (`file_size`, `modified_at`),
+  then computes a `SHA256` content hash only if metadata doesn't match. Images
+  are encoded by CLIP and uploaded to MinIO only when changes are detected.
 - **`ImageService`** is a thin façade over `ObjectStore` so that routes and the
   UI don't have to know about MinIO specifics — they ask for a URL and get a
   presigned URL.

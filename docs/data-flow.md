@@ -72,6 +72,7 @@ sequenceDiagram
     S->>S: reject empty/whitespace query (400)
     S->>E: get_text_features(query)
     E->>E: _ensure_loaded() (first call only)
+    E->>E: _run_with_inference_gate(foreground=True)
     E-->>S: np.ndarray (1, 512)
     S->>V: search(vector, top_k)
     V->>V: query_points(hnsw_ef=128, cosine)
@@ -110,6 +111,7 @@ sequenceDiagram
     P-->>API: PIL.Image
     API->>S: search_by_image(image, top_k)
     S->>E: get_image_features(image)
+    E->>E: _run_with_inference_gate(foreground=True)
     E-->>S: np.ndarray (1, 512)
     S->>V: search(vector, top_k)
     V-->>S: list[dict]
@@ -143,14 +145,20 @@ flowchart TD
     R --> S[Return 202 + job_id]
     R -. worker thread .-> G[Load captions.json if present]
     G --> H[Iterate *.jpg/jpeg/png]
-    H --> I[Check Qdrant payload + MinIO object state]
-    I -- unchanged --> J[Skip]
-    I -- missing object only --> K[Upload repair without re-encoding]
-    I -- new or changed --> L[Batch CLIP image embedding]
-    L --> M[Parallel MinIO uploads]
-    M --> N[Qdrant upsert per ingest batch]
-    N --> O[Update job counters]
-    O --> P[Job completed or failed]
+    H --> I[Check Qdrant Metadata skip?]
+    I -- match --> J[Skip encoding]
+    I -- mismatch --> K[Compute SHA256 file hash]
+    K --> L{Hash match in Qdrant?}
+    L -- match --> J
+    L -- mismatch --> M[Batch CLIP image embedding]
+    J --> N{Object exists in MinIO?}
+    N -- no --> O[Upload to MinIO]
+    N -- yes --> P[Skip upload]
+    M --> O
+    O --> Q[Qdrant upsert per ingest batch]
+    P --> Q
+    Q --> T[Update job counters]
+    T --> U[Job completed or failed]
 ```
 
 The detailed sequence between services:
@@ -180,6 +188,7 @@ sequenceDiagram
         IX->>M: object_exists(images/<name>)
         M-->>IX: exists?
         IX->>E: get_image_batch_features(images)
+        E->>E: _run_with_inference_gate(foreground=False)
         E-->>IX: vectors
         IX->>M: upload files with bounded workers
         M-->>IX: uploaded

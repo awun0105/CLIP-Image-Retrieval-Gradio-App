@@ -1,312 +1,232 @@
-# CLIP Image Retrieval
+<a id="readme-top"></a>
 
-Multimodal fashion retrieval service. A fine-tuned CLIP model
-(`anhquanlam/clip-finetuned-deepfashion`) is exposed through:
+# CLIP Fashion-Products Image Retrieval Engine
 
-- A **FastAPI** REST API (`/api/v1/...`, Swagger at `/docs`).
-- A **Gradio** web UI mounted at `/ui`.
-- A **Qdrant** vector database for exact cosine and HNSW/ANN similarity search.
-- A **MinIO** S3-compatible object store for the image catalogue.
+A multimodal search engine specialized for fashion, powered by AI. Search your product collection using natural language or visual similarity.
 
-Search by free-text caption ("vintage floral dress with puff sleeves") or by
-uploading a reference image — both query types share the same CLIP embedding
-space.
+*Checkout the links:*
 
-## Demo & resources
+[![Hugging Face Space](https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-Space-yellow)](https://huggingface.co/spaces/anhquanlam/CLIP-Fashion-Product-Search)
+[![Model on HF](https://img.shields.io/badge/%F0%9F%A4%97%20Model-DeepFashion_CLIP-orange)](https://huggingface.co/anhquanlam/clip-finetuned-deepfashion)
+[![Dataset on HF](https://img.shields.io/badge/%F0%9F%A4%97%20Dataset-DeepFashion_Multimodal-green)](https://huggingface.co/datasets/anhquanlam/clip-deepfashion-multimodal)
+[![YouTube Demo](https://img.shields.io/badge/YouTube-Project_Demo-red?logo=youtube)](https://www.youtube.com/watch?v=6h3SuES8a-M)
 
-[![YouTube Project Demo Video](https://img.shields.io/badge/YouTube-Demo_Video-ff0000?logo=youtube)](https://www.youtube.com/watch?v=6h3SuES8a-M)
-
-[![Hugging Face Space](https://img.shields.io/badge/HuggingFace-Space-yellow?logo=huggingface)](https://huggingface.co/spaces/anhquanlam/clip-image-search-app-deepfashion-multimodal)
-[![Finetuned Model](https://img.shields.io/badge/HuggingFace-Finetuned_Model-blue?logo=huggingface)](https://huggingface.co/anhquanlam/clip-finetuned-deepfashion)
-[![Dataset ZIP](https://img.shields.io/badge/HuggingFace-Dataset-green?logo=huggingface)](https://huggingface.co/datasets/anhquanlam/clip-deepfashion-multimodal/resolve/main/DeepFashion.zip)
+*Note: This is an MVP / Proof of Concept.*
 
 ## Screenshots
 
-<img width="1919" height="990" alt="image" src="https://github.com/user-attachments/assets/b294222b-1bd7-4b10-bd02-81bee6f878cd" />
-<img width="1919" height="989" alt="image" src="https://github.com/user-attachments/assets/39b60ae5-08fb-4797-86f3-23871d39dad7" />
-<img width="1917" height="996" alt="image" src="https://github.com/user-attachments/assets/80ebfe3b-0aaf-4a24-919e-e77d90042f36" />
+<p align="center">
+  <img src="https://github.com/user-attachments/assets/7c80a45c-7b72-4a3b-9c5f-20226c6cc32c" alt="Starting App" width="800">
+  <br>
+  <em>Starting App</em>
+</p>
 
----
+<p align="center">
+  <img src="https://github.com/user-attachments/assets/0106ffa4-4f47-4b47-a1d0-97faa58428b3" alt="Plaid Skirt Search" width="800">
+  <br>
+  <em>Text Search: "Plaid Skirt" results</em>
+</p>
 
-## Setup & Run
+<p align="center">
+  <img src="https://github.com/user-attachments/assets/3bec63d3-860b-4634-9351-93820f587b9a" alt="Watch Results" width="800">
+  <br>
+  <em>click and watch result</em>
+</p>
 
-> The default path uses **Docker Desktop** — one command starts the whole
-> stack (CLIP model server + Qdrant + MinIO). No Python, no `uv`, no other
-> setup needed. Estimated time: 10–15 minutes including the first-time
-> ~3–5 GB download of the model.
->
-> Each step also has a **👩‍💻 Developer mode** call-out that shows the
-> equivalent native workflow with [`uv`](https://docs.astral.sh/uv/) for
-> contributors who want to edit `src/`, run `pytest`, or attach a debugger.
+<p align="center">
+  <img src="https://github.com/user-attachments/assets/c68b08d2-27be-4276-9afa-8762e13674b0" alt="Jean Jacket Search" width="800">
+  <br>
+  <em>Text Search: "Jean Jacket" results</em>
+</p>
 
-### Step 1 — Install prerequisites
+<p align="center">
+  <img src="https://github.com/user-attachments/assets/35eb958f-4707-4010-8d76-26f0668e5a92" alt="Image Upload" width="800">
+  <br>
+  <em>Image Upload Workflow</em>
+</p>
 
-Install these two free programs:
+<p align="center">
+  <img src="https://github.com/user-attachments/assets/b2bc5f5a-b289-4275-ae28-2e26b2d021f7" alt="Visual Search Results" width="800">
+  <br>
+  <em>Visual Similarity Search Results</em>
+</p>
 
-1. **Docker Desktop** — runs the application containers.
-   - Download: <https://www.docker.com/products/docker-desktop/>
-   - Pick the installer for your operating system (Windows / macOS / Linux),
-     run it, and follow the prompts. On Windows it will ask to enable WSL 2;
-     accept.
-   - After installation, **open Docker Desktop once** so it finishes setup,
-     and leave it running in the background. You should see a small whale
-     icon in your menu bar / system tray when it is ready.
+## Table of Contents
 
-2. **Git** — downloads the project's source code.
-   - Download: <https://git-scm.com/downloads>
-   - Run the installer with the default options.
+- [Screenshots](#screenshots)
+- [Value Proposition](#value-proposition)
+- [Repository Structure](#repository-structure)
+- [Technical Architecture](#technical-architecture)
+- [System Workflow](#system-workflow)
+- [Component Breakdown](#component-breakdown)
+- [Prerequisites](#prerequisites)
+- [Quickstart Guide](#quickstart-guide)
+- [License](#license)
 
-> **👩‍💻 Developer mode** — also install Python ≥ 3.10 and
-> [`uv`](https://docs.astral.sh/uv/) (Astral's fast Python package manager).
-> Install uv with `curl -LsSf https://astral.sh/uv/install.sh | sh`
-> (macOS / Linux) or `pipx install uv` (any platform).
+## Value Proposition
 
-### Step 2 — Open a terminal
+Unlike generic image search tools, this engine is purpose-built for the fashion industry, combining domain-specific AI with a robust infrastructure stack.
 
-- **Windows:** press the Windows key, type `PowerShell`, press Enter.
-- **macOS:** press `Cmd + Space`, type `Terminal`, press Enter.
-- **Linux:** open your usual terminal (GNOME Terminal, Konsole, ...).
+- **Domain-Specific CLIP:** Utilizes `anhquanlam/clip-finetuned-deepfashion`, a model fine-tuned for **30 epochs on DeepFashion**, enabling it to perceive nuanced garment attributes like textures, silhouette cuts, and intricate fashion styles.
+- **Multimodal Flexibility:** Seamlessly handles both Natural Language (text) and Visual Similarity (image) queries within the same shared embedding space.
+- **State-Aware Indexing:** Implements an intelligent pipeline that uses SHA256 content hashing and metadata tracking to skip redundant re-encoding, significantly reducing GPU overhead during dataset updates.
+- **Cloud-Native Storage:** Leverages **Qdrant** for high-performance vector retrieval and **MinIO** for secure, scalable object storage, ensuring the system is ready for production deployment.
 
-You will run all the commands below in this window.
+## Repository Structure
 
-### Step 3 — Download the project
+### Project Tree
 
-Copy / paste these two lines (press Enter after each):
+```text
+CLIP-Image-Retrieval/
+├── src/
+│   ├── api/            # FastAPI routes & REST controllers
+│   ├── core/           # Business logic: AI, search & background indexing
+│   ├── db/             # Data access: Qdrant & MinIO wrappers
+│   ├── ui/             # Gradio Web UI implementation
+│   ├── config.py       # Pydantic Settings & Environment config
+│   └── server.py       # Main entrypoint: Wires API + UI
+├── scripts/            # Data migration & utility tools
+├── tests/              # Comprehensive test suite (API & Core)
+├── Notebook for finetuning/  # CLIP training on DeepFashion
+├── docker-compose.yml  # Multi-container stack definition
+├── Dockerfile          # Optimized build via 'uv'
+├── pyproject.toml      # Dependency management
+└── Makefile            # Developer shortcut commands
+```
+
+### Main components details
+
+| Directory / File | Description |
+| :--- | :--- |
+| **`src/core/`** | The "brain" of the app. Handles CLIP inference (lazy-loaded), search coordination, and incremental indexing with SHA256 hashing. |
+| **`src/db/`** | Abstraction layer for persistence. Manages Qdrant vector collections and MinIO object storage (S3-compatible). |
+| **`src/api/`** | Exposes the service via REST. Includes health checks, asynchronous indexing job management, and search endpoints. |
+| **`src/ui/`** | A user-friendly interface built with Gradio, mounted as a sub-app of the main FastAPI service. |
+| **`scripts/`** | Utilities for bulk-uploading images to MinIO and migrating legacy `.npy` embeddings into Qdrant. |
+| **`config.py`** | Centralized configuration using `pydantic-settings`. Supports `.env` files and environment overrides. |
+
+## Technical Architecture
+
+The engine is built on a modular **Service-Oriented Architecture** (SOA), ensuring a clean separation between AI inference, data persistence, and the presentation layer.
+
+### System Diagram
+
+```mermaid
+flowchart TD
+    Client["User / Client (Browser)"] -- "HTTP / JSON" --> App["FastAPI Application (uvicorn)"]
+
+    subgraph Architecture ["Architecture Components"]
+        direction TB
+        App --> DI["DI Container (lru_cache)"]
+
+        subgraph SL ["Service Layer"]
+            direction TB
+            ES["EmbeddingService"]
+            SS["SearchService"]
+            IX["IndexingService"]
+            IS["ImageService"]
+        end
+
+        subgraph DL ["Data Layer"]
+            direction TB
+            VS["VectorStore (Qdrant)"]
+            OS["ObjectStore (MinIO)"]
+            MS["MigrationService"]
+        end
+
+        subgraph PL ["Presentation Layer"]
+            direction TB
+            UI["Gradio Web UI (/ui)"]
+            DOC["Swagger Docs (/docs)"]
+            API["REST Endpoints"]
+        end
+
+        DI --> SL
+        DI --> DL
+        App --> PL
+    end
+```
+
+### Detailed Tech Stack
+
+| Category | Tools & Technologies |
+| :--- | :--- |
+| **Core AI** | **CLIP (ViT-B/16)** fine-tuned with PyTorch & Transformers. Optimized for fashion semantics. |
+| **Databases** | **Qdrant** (Vector Database) with HNSW indexing; **MinIO** (S3-compatible) for object storage. |
+| **Backend** | **FastAPI** (High-performance web framework); **Pydantic v2** for validation & settings. |
+| **Frontend** | **Gradio v5** for the interactive dashboard, mounted as a sub-app. |
+| **Deployment** | **Docker & Docker Compose** for container orchestration; **uv** for fast dependency resolution. |
+| **Testing** | **Pytest** with async support; In-memory Qdrant & Mocked ObjectStore for CI/CD. |
+
+## System Workflow
+
+The platform operates through a coordinated pipeline across its core services:
+
+1. **Ingestion & State Check:** The `IndexingService` scans local directories, computing unique fingerprints for each image. It cross-references these with existing records to ensure only new or modified assets are processed.
+2. **Feature Extraction:** The `EmbeddingService` employs the fine-tuned CLIP model to project images into 512-dimensional latent vectors, capturing the essential visual "essence" of the apparel.
+3. **Storage & Persistence:** Processed images are persisted in **MinIO**, while their corresponding vectors and metadata are upserted into **Qdrant** using an idempotent ID system based on `uuid5`.
+4. **Similarity Retrieval:** The `SearchService` translates user queries into the same vector space and performs an Approximate Nearest Neighbor (ANN) search in Qdrant, returning ranked results with secure, time-limited presigned URLs.
+
+## Component Breakdown
+
+### 1. Service Layer (`src/core/`)
+
+- **`EmbeddingService`**: Handles CLIP model lifecycle. Features **Lazy Loading** (model only loads upon first request) and **Inference Gating** using `threading.Condition` to prioritize search requests over background indexing.
+- **`IndexingService`**: A robust pipeline for dataset ingestion. It implements **Incremental Processing** via SHA256 content hashing to ensure each image is only encoded once.
+- **`SearchService`**: The primary orchestrator for multimodal queries, converting inputs into vectors and managing retrieval logic.
+- **`ImageService`**: A security-focused façade that generates **Time-Limited Presigned URLs** for images, ensuring assets are not exposed directly to the public internet.
+
+### 2. Data Layer (`src/db/`)
+
+- **`VectorStore`**: A high-performance wrapper for Qdrant. Configured with **HNSW (M=32, ef_construct=200)** for high-recall ANN search. Uses **UUID5** mapping for idempotent point management.
+- **`ObjectStore`**: Manages the lifecycle of image binaries in MinIO. Supports automated bucket provisioning and multi-worker file streaming.
+- **`MigrationService`**: Facilitates the transition from legacy V1 (file-based) to V2 (database-backed) by bulk-loading existing embeddings and images.
+
+### 3. API & UI Layer
+
+- **FastAPI Core (`src/api/`)**: Utilizes a sophisticated **Dependency Injection** system (cached via `lru_cache`) to manage service singletons and database connections.
+- **Gradio Dashboard (`src/ui/`)**: A reactive interface providing real-time similarity feedback, score visualization, and multimodal query toggling.
+- **App Entrypoint (`server.py`)**: Wires all components together, mounting the UI onto the API and configuring global logging and CORS policies.
+
+## Prerequisites
+
+Before running the project, ensure you have the following installed:
+
+- **Docker & Docker Compose**: (Highly Recommended) For one-click orchestration of the app, Qdrant, and MinIO.
+- **Python 3.11+**: For local development.
+- **uv**: Astral's fast Python package manager (required for local setup via `make`).
+- **Make**: To run developer shortcut commands.
+
+## Quickstart Guide
+
+### 1. One-Click Deployment (Recommended)
 
 ```bash
-git clone https://github.com/percylam0105/CLIP-Image-Retrieval-Gradio-App.git
+git clone https://github.com/your-username/CLIP-Image-Retrieval-Gradio-App.git
 cd CLIP-Image-Retrieval-Gradio-App
+docker compose up -d
 ```
 
-This creates a folder named `CLIP-Image-Retrieval-Gradio-App` and moves you
-inside it.
+- **Web UI:** [http://localhost:8000/ui](http://localhost:8000/ui)
+- **API Docs:** [http://localhost:8000/docs](http://localhost:8000/docs)
+- **Health Check:** [http://localhost:8000/health](http://localhost:8000/health)
+- **MinIO Console:** [http://localhost:9001](http://localhost:9001) (Login: `minioadmin` / `minioadmin`)
 
-> **👩‍💻 Developer mode** — same step. Optionally copy the env template
-> with `cp .env.example .env` if you want to override defaults (model id,
-> Qdrant mode, etc.) — see [Configuration](#configuration).
-
-### Step 4 — Start the application
-
-One command. The first run builds the application image and downloads the
-CLIP model (~3–5 GB, ~5 minutes); subsequent runs start in seconds.
+### 2. Local Development
 
 ```bash
-docker compose up -d --build
+make install
+
+cp .env.example .env  # Configure your settings
+
+docker compose up -d qdrant minio #start database and object storage
+
+make run #start backend api
 ```
 
-While you wait, you'll see lines like `=> [internal] load build context` and
-`Pulling qdrant`. When the prompt comes back the stack is up.
+## License
 
-Check that everything is running:
+Distributed under the MIT License. See `LICENSE` for more information.
 
-```bash
-docker compose ps
-```
-
-You should see three lines: `app`, `qdrant`, `minio`, all with status `Up`.
-
-> **Tip:** if you have `make` installed (macOS / Linux usually do; on Windows
-> install via [Chocolatey](https://chocolatey.org/) or skip it), you can use
-> the shorter `make docker-up`.
-
-> **👩‍💻 Developer mode** — run the app natively on your host so code edits
-> take effect on restart without rebuilding the image. You still need Qdrant
-> + MinIO running for the full feature set:
-> ```bash
-> docker compose up -d qdrant minio   # sidecar services only
-> uv sync                              # creates .venv, installs deps + dev tools
-> uv run clip-retrieval                # starts FastAPI on :8000 with Gradio at /ui
-> ```
-> Or with the in-memory Qdrant (no MinIO upload / persistence):
-> set `QDRANT_MODE=memory` in `.env`, skip the `docker compose` line.
-
-### Step 5 — Open the app
-
-Open your web browser and visit:
-
-| What you'll see | URL |
-|---|---|
-| 🖼 The search interface (Gradio) | <http://localhost:8000/ui> |
-| 📖 The API documentation (Swagger) | <http://localhost:8000/docs> |
-| ❤️ Is everything healthy? | <http://localhost:8000/health> |
-| 📂 The image storage admin panel (MinIO console) | <http://localhost:9001> *(login `minioadmin` / `minioadmin`)* |
-
-The first time you open `/ui`, the AI model is loaded into memory — this can
-take a minute. After that, searches are instant.
-
-> **What if the page doesn't load?** Wait ~30 seconds and refresh. If it
-> still doesn't work, see [Troubleshooting](#troubleshooting) below.
-
-### Step 6 — Add your own images (optional)
-
-Out of the box the app has no images indexed yet. To add some:
-
-1. Put your `.jpg` / `.jpeg` / `.png` files into a folder on your computer
-   (e.g. `~/my-images`).
-2. Tell the app to index them. Replace the path with your actual folder:
-
-   **macOS / Linux:**
-   ```bash
-   curl -X POST http://localhost:8000/api/v1/index/ \
-     -H 'Content-Type: application/json' \
-     -d '{"images_dir": "/full/path/to/my-images"}'
-   ```
-
-   **Windows PowerShell:**
-   ```powershell
-   Invoke-RestMethod -Uri http://localhost:8000/api/v1/index/ `
-     -Method POST -ContentType 'application/json' `
-     -Body '{"images_dir": "C:/full/path/to/my-images"}'
-   ```
-
-   **No-terminal alternative:** open <http://localhost:8000/docs>, expand
-   `POST /api/v1/index/`, click **Try it out**, edit the JSON, click
-   **Execute**.
-
-   The endpoint starts a background indexing job and returns a `job_id`.
-   Check progress with:
-
-   ```bash
-   curl http://localhost:8000/api/v1/index/<job_id>
-   ```
-
-3. Go back to <http://localhost:8000/ui> and search. Your images will now
-   appear as results after the job status becomes `completed`.
-
-> **👩‍💻 Developer mode** — if you have a pre-computed embedding dataset
-> (`df.csv` + `df_image_embeds.npy` + `captions.json`), use the migration
-> scripts instead of re-encoding:
-> ```bash
-> uv run python scripts/upload_images_to_minio.py   # upload raw images to MinIO
-> uv run python scripts/migrate_to_qdrant.py        # upsert precomputed embeddings
-> ```
-> The scripts read `LEGACY_IMAGES_PATH`, `LEGACY_INDEX_PATH`, and
-> `CAPTIONS_PATH` from `.env`.
-
-### Step 7 — Stop the application
-
-```bash
-docker compose down
-```
-
-Indexed images and embeddings are preserved in Docker volumes — the next
-`docker compose up -d` brings everything back.
-
-To **completely wipe** the data (drops volumes):
-
-```bash
-docker compose down -v
-```
-
-> **👩‍💻 Developer mode** — press `Ctrl + C` in the terminal running
-> `uv run clip-retrieval`. Run `docker compose down` separately to stop the
-> Qdrant + MinIO sidecars.
-
-### Troubleshooting
-
-| Symptom | Fix |
-|---|---|
-| `docker: command not found` | Docker Desktop is not installed or not started. Open it from your Applications / Start menu. |
-| `Cannot connect to the Docker daemon` | Docker Desktop is installed but not running. Click its icon and wait until it says "Engine running". |
-| `port is already allocated` | Another program is using port 8000, 9000, 9001, 6333, or 6334. Either stop the other program or edit `docker-compose.yml` and change the host port (the number on the **left** of `:`). |
-| Browser shows "Site can't be reached" | Wait 30 seconds and refresh. The first start has to download the model. Check progress with `docker compose logs -f app`. |
-| `out of disk space` / build fails | The model is ~3 GB. Free up ~10 GB of disk space, then re-run the build. |
-| Searches return no results | You haven't indexed any images yet. See [Step 6](#step-6--add-your-own-images-optional), or use the Hugging Face dataset (link at the top). |
-| `uv: command not found` (developer mode) | `uv` is not installed or not on `PATH`. Reinstall via `curl -LsSf https://astral.sh/uv/install.sh \| sh` and restart your terminal. |
-
----
-
-## Developer reference
-
-Common commands for contributors. All assume `uv sync` has been run once
-to create the `.venv`.
-
-| `make` target | Equivalent | Purpose |
-|---|---|---|
-| `make dev` | `uv sync` | Install runtime + dev deps into `.venv` |
-| `make run` | `uv run clip-retrieval` | Start FastAPI + Gradio on :8000 |
-| `make test` | `uv run pytest tests/ -v` | Run the unit-test suite (~3s) |
-| `make lint` | `uv run ruff check src/ tests/` | Static lint |
-| `make format` | `uv run ruff format src/ tests/` | Auto-format |
-| `make lock` | `uv lock` | Regenerate `uv.lock` after editing `pyproject.toml` |
-| `make docker-up` / `make docker-down` | `docker compose up -d` / `down` | Full stack via Docker |
-| `make migrate` | `uv run python scripts/migrate_to_qdrant.py` | Upsert legacy embeddings |
-| `make qdrant-index-config` | `uv run python scripts/update_qdrant_index_config.py` | Apply HNSW/optimizer thresholds |
-
-To apply the configured Qdrant HNSW/optimizer thresholds to an existing
-collection without recreating it:
-
-```bash
-make qdrant-index-config
-```
-
-The test suite uses Qdrant in-memory mode and a MinIO mock, so it requires
-no external services.
-
----
-
-## Repository layout
-
-```
-src/
-├── api/           # FastAPI factory, dependencies, routes, request/response schemas
-├── core/          # EmbeddingService, SearchService, IndexingService, ImageService
-├── db/            # Qdrant VectorStore, MinIO ObjectStore, MigrationService
-├── ui/            # Gradio Blocks UI factory
-├── config.py      # Pydantic Settings (loads from env / .env)
-└── server.py      # Entry point — builds app, mounts Gradio, starts uvicorn
-docs/
-├── architecture.md
-├── data-flow.md
-└── plans/
-scripts/           # Standalone CLIs for one-off migrations
-tests/             # pytest suite (Qdrant in-memory, MinIO mock, FastAPI TestClient)
-docker-compose.yml # qdrant + minio + app
-Dockerfile         # uv-based, multi-layer for fast rebuilds
-pyproject.toml     # PEP-621 + uv lockfile (uv.lock)
-```
-
-## REST API
-
-| Method | Path | Body | Description |
-|---|---|---|---|
-| `POST` | `/api/v1/search/text` | `{ "query": str, "top_k": int, "search_mode"?: "ann" \| "exact" \| "ann_indexed_only", "hnsw_ef"?: int }` | Text → top-K image hits with presigned URLs |
-| `POST` | `/api/v1/search/image` | multipart `file=@...` + `?top_k=N&search_mode=ann&hnsw_ef=128` | Image → top-K similar images |
-| `POST` | `/api/v1/index/` | `{ "images_dir": str? }` | Start a background image indexing job and return `job_id` |
-| `GET` | `/api/v1/index/{job_id}` | — | Read indexing job status, counters, errors, and final collection info |
-| `GET` | `/health` | — | Model + Qdrant + MinIO health |
-
-Full schemas live in [`docs/architecture.md`](docs/architecture.md) and the
-Swagger UI at `/docs`.
-
-## Configuration
-
-All settings come from environment variables (and an optional `.env`). See
-[`.env.example`](.env.example) for the full list. Important ones:
-
-| Variable | Default | Notes |
-|---|---|---|
-| `MODEL_ID` | `anhquanlam/clip-finetuned-deepfashion` | Hugging Face model id |
-| `QDRANT_MODE` | `memory` | `memory` / `local` / `remote` |
-| `QDRANT_URL` | `http://localhost:6333` | Used when `QDRANT_MODE=remote` |
-| `QDRANT_COLLECTION` | `fashion_images` | Qdrant collection name |
-| `QDRANT_HNSW_EF` | `128` | ANN search breadth; higher improves recall but costs latency |
-| `QDRANT_INDEXING_THRESHOLD` | `5000` | Build vector indexes for smaller Qdrant segments than the default |
-| `QDRANT_FULL_SCAN_THRESHOLD` | `5000` | Prefer HNSW over full-scan for more segment searches |
-| `SEARCH_MODE_DEFAULT` | `ann` | Default mode: `ann`, `exact`, or `ann_indexed_only` |
-| `INGEST_BATCH_SIZE` | `32` | Images encoded/upserted per indexing batch |
-| `MINIO_UPLOAD_WORKERS` | `8` | Max concurrent MinIO uploads during indexing |
-| `INDEX_FAST_METADATA_SKIP` | `true` | Skip unchanged files using size/mtime before hashing |
-| `INDEX_REPAIR_MISSING_OBJECTS` | `true` | Stat MinIO objects for unchanged payloads and re-upload missing files |
-| `MINIO_ENDPOINT` | `localhost:9000` | host:port |
-| `MINIO_BUCKET` | `fashion-images` | Bucket; auto-created on startup |
-| `API_HOST` / `API_PORT` | `0.0.0.0` / `8000` | uvicorn bind |
-| `LOG_LEVEL` | `INFO` | Logging level |
-
-## Architecture
-
-See [`docs/architecture.md`](docs/architecture.md) for a description of the
-service boundaries and module responsibilities, and
-[`docs/data-flow.md`](docs/data-flow.md) for Mermaid diagrams of every flow
-(startup, text search, image search, indexing, health, migration, UI,
-storage shape).
+----
+<p align="right">(<a href="#readme-top">back to top</a>)</p>

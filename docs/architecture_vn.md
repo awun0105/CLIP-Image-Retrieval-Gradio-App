@@ -26,10 +26,10 @@ Code chính nằm trong `src/core/`.
 
 Các service quan trọng:
 
-- `EmbeddingService`: load model CLIP và biến text/image thành vector 512 chiều.
-- `SearchService`: nhận query, gọi CLIP tạo embedding, rồi query Qdrant.
-- `IndexingService`: đọc ảnh từ thư mục, tạo embedding, upload ảnh lên MinIO, lưu vector vào Qdrant.
-- `ImageService`: lấy presigned URL từ MinIO để frontend/API có thể hiển thị ảnh.
+- `EmbeddingService`: load model CLIP và biến text/image thành vector 512 chiều. Model được lazy load (chỉ tải khi cần). Service này triển khai cơ chế **Inference Gating** (điều phối tài nguyên GPU) để ưu tiên các yêu cầu tìm kiếm (foreground) hơn các tác vụ indexing chạy nền.
+- `SearchService`: nhận query, gọi CLIP tạo embedding, rồi query Qdrant. Hỗ trợ nhiều chế độ tìm kiếm (ANN, Exact) và tùy chỉnh tham số `hnsw_ef`.
+- `IndexingService`: đọc ảnh từ thư mục và thực hiện **Incremental Indexing** (indexing tăng trưởng). Nó kiểm tra metadata và hash SHA256 để chỉ encode những ảnh mới hoặc đã thay đổi, sau đó upload lên MinIO và lưu vector vào Qdrant.
+- `ImageService`: lấy presigned URL từ MinIO để frontend/API có thể hiển thị ảnh một cách bảo mật.
 
 Model CLIP được lazy load, tức là chỉ load khi có request cần embedding, không load ngay khi app startup.
 
