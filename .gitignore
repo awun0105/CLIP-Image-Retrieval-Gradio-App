@@ -39,6 +39,6 @@ hf_cache/
 
 Dataset/
 
-docs/plans/source-analysis.md
+docs/plans/*
 
 docs/QA.md
