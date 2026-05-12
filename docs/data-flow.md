@@ -127,8 +127,9 @@ sequenceDiagram
 
 ## 4) Indexing a directory
 
-`POST /api/v1/index/` with `{ "images_dir": "/path" }` (optional — falls back
-to `LEGACY_IMAGES_PATH`).
+`POST /api/v1/index/` with `{ "images_dir": "/path" }` starts a background
+indexing job (optional path — falls back to `LEGACY_IMAGES_PATH`). The response
+contains a `job_id`; call `GET /api/v1/index/{job_id}` to poll status.
 
 ```mermaid
 flowchart TD
@@ -138,17 +139,18 @@ flowchart TD
     C --> E{dir exists?}
     D --> E
     E -- no --> F[HTTP 404]
-    E -- yes --> G[Load captions.json if present]
+    E -- yes --> R[Create background job]
+    R --> S[Return 202 + job_id]
+    R -. worker thread .-> G[Load captions.json if present]
     G --> H[Iterate *.jpg/jpeg/png]
-    H --> I[For each image]
-    I --> J[PIL.Image.open]
-    J --> K[EmbeddingService.get_image_features]
-    K --> L[ObjectStore.upload_file → images/&lt;name&gt;]
-    L --> M[Append key + 512-d vector to batch]
-    M -. on exception .-> N[Log warning, skip image]
-    H --> O[VectorStore.upsert_batch keys, np.array]
-    O --> P[Batches of 100 with uuid5 ids]
-    P --> Q[Return IndexResponse: indexed_count, collection_info]
+    H --> I[Check Qdrant payload + MinIO object state]
+    I -- unchanged --> J[Skip]
+    I -- missing object only --> K[Upload repair without re-encoding]
+    I -- new or changed --> L[Batch CLIP image embedding]
+    L --> M[Parallel MinIO uploads]
+    M --> N[Qdrant upsert per ingest batch]
+    N --> O[Update job counters]
+    O --> P[Job completed or failed]
 ```
 
 The detailed sequence between services:
@@ -158,6 +160,7 @@ sequenceDiagram
     autonumber
     participant C as Client
     participant API as FastAPI route
+    participant JOB as Indexing job registry
     participant IX as IndexingService
     participant FS as Local filesystem
     participant E as EmbeddingService
@@ -165,26 +168,29 @@ sequenceDiagram
     participant V as VectorStore (Qdrant)
 
     C->>API: POST /api/v1/index/
-    API->>IX: index_directory(path)
+    API->>IX: start_indexing_job(path)
+    IX->>JOB: create queued job
+    IX-->>API: job_id
+    API-->>C: IndexStartResponse(status=queued, job_id)
+    IX->>IX: background worker runs index_directory(path)
     IX->>FS: scan *.jpg/jpeg/png
-    FS-->>IX: list[Path]
-    loop each image
-        IX->>FS: open(image)
-        FS-->>IX: PIL.Image
-        IX->>E: get_image_features(img)
-        E-->>IX: vector
-        IX->>M: upload_file(local_path, images/<name>)
-        M-->>IX: 200
+    loop each ingest batch
+        IX->>V: get_payloads(point_ids)
+        V-->>IX: metadata
+        IX->>M: object_exists(images/<name>)
+        M-->>IX: exists?
+        IX->>E: get_image_batch_features(images)
+        E-->>IX: vectors
+        IX->>M: upload files with bounded workers
+        M-->>IX: uploaded
+        IX->>V: upsert_batch(keys, vectors, captions, metadata)
+        V-->>IX: ok
+        IX->>JOB: update counters
     end
-    IX->>V: upsert_batch(keys, vectors, captions)
-    loop batch of 100
-        V->>V: client.upsert(points, id=uuid5(NAMESPACE_URL, key))
-    end
-    V-->>IX: ok
-    IX-->>API: indexed_count
-    API->>V: get_collection_info()
-    V-->>API: dict(name, points_count, status)
-    API-->>C: IndexResponse(indexed_count, collection_info)
+    IX->>JOB: mark completed or failed
+    C->>API: GET /api/v1/index/{job_id}
+    API->>JOB: get job snapshot
+    API-->>C: IndexJobResponse(counters, status, error)
 ```
 
 ---

@@ -74,7 +74,9 @@ Browser
 Text search và image search dùng cùng một embedding space của CLIP, nên cả text và ảnh đều có thể so sánh với ảnh đã index.
 
 **7. Luồng index ảnh**
-Khi gọi `/api/v1/index/`, app sẽ:
+Khi gọi `POST /api/v1/index/`, app tạo một background indexing job và trả về
+`job_id` ngay. Client có thể gọi `GET /api/v1/index/{job_id}` để xem trạng
+thái, counters và lỗi nếu có.
 
 ```text
 Đọc folder ảnh
@@ -83,7 +85,7 @@ Khi gọi `/api/v1/index/`, app sẽ:
  -> lưu vector + metadata vào Qdrant
 ```
 
-Sau đó ảnh mới có thể được tìm kiếm.
+Sau khi job chuyển sang `completed`, ảnh mới có thể được tìm kiếm.
 
 **8. Dependency Injection**
 [src/api/dependencies.py](/home/lqaq/PROJECT/CLIP-Image-Retrieval-Gradio-App/src/api/dependencies.py) dùng `@lru_cache(maxsize=1)` để tạo singleton cho settings, model service, Qdrant store, MinIO store, search/index services.

@@ -21,7 +21,7 @@ router = APIRouter(prefix="/api/v1/index", tags=["index"])
 def _job_response(job: IndexingJob, vector_store: VectorStore) -> IndexJobResponse:
     stats = job.stats
     collection_info = None
-    if job.status in {"running", "completed", "failed"}:
+    if job.status in {"completed", "failed"}:
         try:
             collection_info = vector_store.get_collection_info()
         except Exception as exc:

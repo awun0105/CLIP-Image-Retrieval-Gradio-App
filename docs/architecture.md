@@ -123,7 +123,10 @@ REST routes and the Gradio UI:
   - `POST /api/v1/search/image` — multipart `UploadFile` + `?top_k=N`, decodes
     via PIL.
   - `POST /api/v1/index/` — optional `images_dir`, falls back to
-    `LEGACY_IMAGES_PATH`.
+    `LEGACY_IMAGES_PATH`, starts a background indexing job, and returns
+    a `job_id`.
+  - `GET /api/v1/index/{job_id}` — returns indexing job status, counters,
+    errors, and final collection info.
   - `GET /health` — reports model load status, Qdrant collection info, and the
     active MinIO bucket.
 
