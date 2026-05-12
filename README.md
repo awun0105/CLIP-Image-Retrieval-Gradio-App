@@ -18,25 +18,37 @@ A multimodal search engine specialized for fashion, powered by AI. Search your p
 <p align="center">
   <img src="https://github.com/user-attachments/assets/7c80a45c-7b72-4a3b-9c5f-20226c6cc32c" alt="Starting App" width="800">
   <br>
-  <em>System Initialization & Service Health</em>
+  <em>Starting App</em>
 </p>
 
 <p align="center">
   <img src="https://github.com/user-attachments/assets/0106ffa4-4f47-4b47-a1d0-97faa58428b3" alt="Plaid Skirt Search" width="800">
   <br>
-  <em>Semantic Search: "Plaid Skirt" results</em>
-</p>
-
-<p align="center">
-  <img src="https://github.com/user-attachments/assets/c68b08d2-27be-4276-9afa-8762e13674b0" alt="Jean Jacket Search" width="800">
-  <br>
-  <em>Visual Similarity: "Jean Jacket" results</em>
+  <em>Text Search: "Plaid Skirt" results</em>
 </p>
 
 <p align="center">
   <img src="https://github.com/user-attachments/assets/3bec63d3-860b-4634-9351-93820f587b9a" alt="Watch Results" width="800">
   <br>
-  <em>Advanced Multimodal Retrieval</em>
+  <em>click and watch result</em>
+</p>
+
+<p align="center">
+  <img src="https://github.com/user-attachments/assets/c68b08d2-27be-4276-9afa-8762e13674b0" alt="Jean Jacket Search" width="800">
+  <br>
+  <em>Text Search: "Jean Jacket" results</em>
+</p>
+
+<p align="center">
+  <img src="https://github.com/user-attachments/assets/35eb958f-4707-4010-8d76-26f0668e5a92" alt="Image Upload" width="800">
+  <br>
+  <em>Image Upload Workflow</em>
+</p>
+
+<p align="center">
+  <img src="https://github.com/user-attachments/assets/b2bc5f5a-b289-4275-ae28-2e26b2d021f7" alt="Visual Search Results" width="800">
+  <br>
+  <em>Visual Similarity Search Results</em>
 </p>
 
 ## Table of Contents
@@ -184,8 +196,8 @@ docker compose up -d
 
 - **Web UI:** [http://localhost:8000/ui](http://localhost:8000/ui)
 - **API Docs:** [http://localhost:8000/docs](http://localhost:8000/docs)
-- **Check health backend:** [http://localhost:8000/health](http://localhost:8000/health)
-- **The image storage admin panel (MinIO console):**[http://localhost:9001](http://localhost:9001) (login minioadmin / minioadmin)
+- **Health Check:** [http://localhost:8000/health](http://localhost:8000/health)
+- **MinIO Console:** [http://localhost:9001](http://localhost:9001) (Login: `minioadmin` / `minioadmin`)
 
 ### 2. Local Development
 
