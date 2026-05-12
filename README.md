@@ -59,6 +59,7 @@ A multimodal search engine specialized for fashion, powered by AI. Search your p
 - [Technical Architecture](#technical-architecture)
 - [System Workflow](#system-workflow)
 - [Component Breakdown](#component-breakdown)
+- [Prerequisites](#prerequisites)
 - [Quickstart Guide](#quickstart-guide)
 - [License](#license)
 
@@ -186,6 +187,15 @@ The platform operates through a coordinated pipeline across its core services:
 - **FastAPI Core (`src/api/`)**: Utilizes a sophisticated **Dependency Injection** system (cached via `lru_cache`) to manage service singletons and database connections.
 - **Gradio Dashboard (`src/ui/`)**: A reactive interface providing real-time similarity feedback, score visualization, and multimodal query toggling.
 - **App Entrypoint (`server.py`)**: Wires all components together, mounting the UI onto the API and configuring global logging and CORS policies.
+
+## Prerequisites
+
+Before running the project, ensure you have the following installed:
+
+- **Docker & Docker Compose**: (Highly Recommended) For one-click orchestration of the app, Qdrant, and MinIO.
+- **Python 3.11+**: For local development.
+- **uv**: Astral's fast Python package manager (required for local setup via `make`).
+- **Make**: To run developer shortcut commands.
 
 ## Quickstart Guide
 
