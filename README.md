@@ -163,8 +163,15 @@ Out of the box the app has no images indexed yet. To add some:
    `POST /api/v1/index/`, click **Try it out**, edit the JSON, click
    **Execute**.
 
+   The endpoint starts a background indexing job and returns a `job_id`.
+   Check progress with:
+
+   ```bash
+   curl http://localhost:8000/api/v1/index/<job_id>
+   ```
+
 3. Go back to <http://localhost:8000/ui> and search. Your images will now
-   appear as results.
+   appear as results after the job status becomes `completed`.
 
 > **👩‍💻 Developer mode** — if you have a pre-computed embedding dataset
 > (`df.csv` + `df_image_embeds.npy` + `captions.json`), use the migration
@@ -265,7 +272,8 @@ pyproject.toml     # PEP-621 + uv lockfile (uv.lock)
 |---|---|---|---|
 | `POST` | `/api/v1/search/text` | `{ "query": str, "top_k": int, "search_mode"?: "ann" \| "exact" \| "ann_indexed_only", "hnsw_ef"?: int }` | Text → top-K image hits with presigned URLs |
 | `POST` | `/api/v1/search/image` | multipart `file=@...` + `?top_k=N&search_mode=ann&hnsw_ef=128` | Image → top-K similar images |
-| `POST` | `/api/v1/index/` | `{ "images_dir": str? }` | Encode + upload + upsert a directory of images |
+| `POST` | `/api/v1/index/` | `{ "images_dir": str? }` | Start a background image indexing job and return `job_id` |
+| `GET` | `/api/v1/index/{job_id}` | — | Read indexing job status, counters, errors, and final collection info |
 | `GET` | `/health` | — | Model + Qdrant + MinIO health |
 
 Full schemas live in [`docs/architecture.md`](docs/architecture.md) and the

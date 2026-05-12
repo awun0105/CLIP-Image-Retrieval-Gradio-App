@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
+from threading import Event, Thread
+from time import sleep
 from unittest.mock import MagicMock, patch
 
 import numpy as np
@@ -136,3 +138,57 @@ def test_get_text_features_handles_legacy_tensor_return():
 
     assert isinstance(result, np.ndarray)
     np.testing.assert_array_equal(result, tensor.numpy())
+
+
+def test_foreground_inference_runs_before_waiting_background_batch():
+    service = EmbeddingService(Settings(device="cpu"))
+    model = MagicMock()
+    service._model = model
+    tokenizer = MagicMock()
+    tokenizer.return_value.to.return_value = {}
+    service._tokenizer = tokenizer
+    processor = MagicMock()
+    processor.return_value.to.return_value = {}
+    service._processor = processor
+
+    order: list[str] = []
+    first_batch_started = Event()
+    release_first_batch = Event()
+    image_calls = 0
+
+    def image_features(**_inputs):
+        nonlocal image_calls
+        image_calls += 1
+        if image_calls == 1:
+            order.append("background-1-start")
+            first_batch_started.set()
+            release_first_batch.wait(timeout=2)
+            order.append("background-1-end")
+        else:
+            order.append("background-2")
+        return torch.zeros(1, 512)
+
+    def text_features(**_inputs):
+        order.append("foreground")
+        return torch.ones(1, 512)
+
+    model.get_image_features.side_effect = image_features
+    model.get_text_features.side_effect = text_features
+
+    background_1 = Thread(target=lambda: service.get_image_batch_features([MagicMock()]))
+    background_2 = Thread(target=lambda: service.get_image_batch_features([MagicMock()]))
+    foreground = Thread(target=lambda: service.get_text_features("query"))
+
+    background_1.start()
+    assert first_batch_started.wait(timeout=2)
+    background_2.start()
+    sleep(0.02)
+    foreground.start()
+    sleep(0.02)
+    release_first_batch.set()
+
+    background_1.join(timeout=2)
+    background_2.join(timeout=2)
+    foreground.join(timeout=2)
+
+    assert order == ["background-1-start", "background-1-end", "foreground", "background-2"]

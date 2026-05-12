@@ -42,6 +42,30 @@ class IndexResponse(BaseModel):
     collection_info: dict
 
 
+class IndexStartResponse(BaseModel):
+    job_id: str
+    status: str
+    status_url: str
+    message: str
+
+
+class IndexJobResponse(BaseModel):
+    job_id: str
+    status: str
+    images_dir: str | None = None
+    indexed_count: int = 0
+    updated_count: int = 0
+    skipped_count: int = 0
+    uploaded_only_count: int = 0
+    failed_count: int = 0
+    scanned_count: int = 0
+    collection_info: dict | None = None
+    error: str | None = None
+    created_at: str | None = None
+    started_at: str | None = None
+    finished_at: str | None = None
+
+
 class HealthResponse(BaseModel):
     status: str
     model_loaded: bool
