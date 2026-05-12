@@ -14,12 +14,30 @@ A multimodal search engine specialized for fashion, powered by AI. Search your p
 *Note: This is an MVP / Proof of Concept.*
 
 ## Screenshots
-<!-- INSERT YOUR SCREENSHOTS HERE -->
-<!-- Example: ![Gradio UI Search](path/to/screenshot.png) -->
-[starting app](<img width="1890" height="876" alt="Image" src="https://github.com/user-attachments/assets/7c80a45c-7b72-4a3b-9c5f-20226c6cc32c" />)
-[plaid skirt](<img width="1251" height="919" alt="Image" src="https://github.com/user-attachments/assets/0106ffa4-4f47-4b47-a1d0-97faa58428b3" />)
-[Watch results](<img width="1871" height="922" alt="Image" src="https://github.com/user-attachments/assets/3bec63d3-860b-4634-9351-93820f587b9a" />)
-[jean jacket](<img width="1237" height="920" alt="Image" src="https://github.com/user-attachments/assets/c68b08d2-27be-4276-9afa-8762e13674b0" />)
+
+<p align="center">
+  <img src="https://github.com/user-attachments/assets/7c80a45c-7b72-4a3b-9c5f-20226c6cc32c" alt="Starting App" width="800">
+  <br>
+  <em>System Initialization & Service Health</em>
+</p>
+
+<p align="center">
+  <img src="https://github.com/user-attachments/assets/0106ffa4-4f47-4b47-a1d0-97faa58428b3" alt="Plaid Skirt Search" width="800">
+  <br>
+  <em>Semantic Search: "Plaid Skirt" results</em>
+</p>
+
+<p align="center">
+  <img src="https://github.com/user-attachments/assets/c68b08d2-27be-4276-9afa-8762e13674b0" alt="Jean Jacket Search" width="800">
+  <br>
+  <em>Visual Similarity: "Jean Jacket" results</em>
+</p>
+
+<p align="center">
+  <img src="https://github.com/user-attachments/assets/3bec63d3-860b-4634-9351-93820f587b9a" alt="Watch Results" width="800">
+  <br>
+  <em>Advanced Multimodal Retrieval</em>
+</p>
 
 ## Table of Contents
 
