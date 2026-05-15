@@ -26,6 +26,9 @@ dependencies = [
     "pillow>=10.0",
     "tqdm>=4.60",
     "python-multipart>=0.0.9",
+    "prometheus-client>=0.20",
+    "redis>=5.0",
+    "rq>=2.0",
 ]
 
 [project.optional-dependencies]
