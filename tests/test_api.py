@@ -14,7 +14,7 @@ from api.app import create_app
 from api.dependencies import (
     get_embedding_service,
     get_image_service,
-    get_indexing_service,
+    get_indexing_job_backend,
     get_object_store,
     get_search_service,
     get_settings,
@@ -22,6 +22,7 @@ from api.dependencies import (
 )
 from core.image_service import ImageService
 from core.indexing import IndexingService
+from core.indexing_jobs import IndexingJobBackend
 from core.search import SearchService
 
 
@@ -50,7 +51,7 @@ def client(settings, vector_store, fake_embedding_service, fake_object_store):
     def _missing_indexing():
         raise AssertionError("indexing service should not be invoked in this test")
 
-    app.dependency_overrides[get_indexing_service] = _missing_indexing
+    app.dependency_overrides[get_indexing_job_backend] = _missing_indexing
 
     with TestClient(app) as c:
         yield c
@@ -222,12 +223,13 @@ def test_index_job_api(settings, vector_store, fake_embedding_service, fake_obje
         fake_object_store,
         settings,
     )
+    indexing_jobs = IndexingJobBackend(indexing_service, settings)
 
     app = create_app()
     app.dependency_overrides[get_settings] = lambda: settings
     app.dependency_overrides[get_vector_store] = lambda: vector_store
     app.dependency_overrides[get_object_store] = lambda: fake_object_store
-    app.dependency_overrides[get_indexing_service] = lambda: indexing_service
+    app.dependency_overrides[get_indexing_job_backend] = lambda: indexing_jobs
     app.dependency_overrides[get_embedding_service] = lambda: fake_embedding_service
 
     with TestClient(app) as c:
