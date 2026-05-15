@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 from threading import Condition, Lock
+from time import perf_counter
 from typing import Any, TypeVar, cast
 
 import numpy as np
@@ -12,6 +13,7 @@ import torch
 from transformers import CLIPModel, CLIPProcessor, CLIPTokenizer
 
 from config import Settings
+from core.metrics import EMBEDDING_LATENCY
 
 logger = logging.getLogger(__name__)
 
@@ -73,7 +75,7 @@ class EmbeddingService:
             self._tokenizer = CLIPTokenizer.from_pretrained(self.settings.model_id)
             self._processor = CLIPProcessor.from_pretrained(self.settings.model_id)
 
-    def _run_with_inference_gate(self, fn: Callable[[], T], *, foreground: bool) -> T:
+    def _run_with_inference_gate(self, fn: Callable[[], T], *, foreground: bool, kind: str) -> T:
         with self._inference_gate:
             if foreground:
                 self._foreground_waiting += 1
@@ -85,8 +87,13 @@ class EmbeddingService:
                 if foreground:
                     self._foreground_waiting -= 1
         try:
+            start = perf_counter()
             return fn()
         finally:
+            EMBEDDING_LATENCY.labels(
+                kind,
+                "foreground" if foreground else "background",
+            ).observe(perf_counter() - start)
             with self._inference_gate:
                 self._inference_active = False
                 self._inference_gate.notify_all()
@@ -102,7 +109,7 @@ class EmbeddingService:
             inputs = tokenizer(text, return_tensors="pt").to(self.device)
             return model.get_text_features(**inputs)
 
-        output = self._run_with_inference_gate(_infer, foreground=True)
+        output = self._run_with_inference_gate(_infer, foreground=True, kind="text")
         return _as_tensor(output).cpu().numpy()
 
     @torch.no_grad()
@@ -116,7 +123,7 @@ class EmbeddingService:
             inputs = processor(images=image, return_tensors="pt").to(self.device)
             return model.get_image_features(**inputs)
 
-        output = self._run_with_inference_gate(_infer, foreground=True)
+        output = self._run_with_inference_gate(_infer, foreground=True, kind="image")
         return _as_tensor(output).cpu().numpy()
 
     @torch.no_grad()
@@ -133,5 +140,5 @@ class EmbeddingService:
             inputs = processor(images=images, return_tensors="pt").to(self.device)
             return model.get_image_features(**inputs)
 
-        output = self._run_with_inference_gate(_infer, foreground=False)
+        output = self._run_with_inference_gate(_infer, foreground=False, kind="image_batch")
         return _as_tensor(output).cpu().numpy()

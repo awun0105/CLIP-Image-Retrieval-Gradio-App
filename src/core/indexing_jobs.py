@@ -14,6 +14,7 @@ from rq import Queue
 
 from config import Settings
 from core.indexing import IndexingJob, IndexingJobAlreadyRunning, IndexingService
+from core.metrics import INDEXING_JOBS
 from core.schemas import IndexingStats
 
 logger = logging.getLogger(__name__)
@@ -109,6 +110,7 @@ def run_indexing_job(job_id: str, images_dir: str) -> None:
         )
     except Exception as exc:
         logger.exception("Indexing job %s failed", job_id)
+        INDEXING_JOBS.labels("failed").inc()
         _update_job(
             redis,
             job_id,
@@ -119,6 +121,7 @@ def run_indexing_job(job_id: str, images_dir: str) -> None:
         redis.delete(_ACTIVE_JOB_KEY)
         raise
 
+    INDEXING_JOBS.labels("completed").inc()
     _update_job(
         redis,
         job_id,

@@ -68,6 +68,13 @@ def test_health(client, fake_object_store):
     assert body["qdrant"]["sample_has_vector"] is True
 
 
+def test_metrics_endpoint_and_request_id(client):
+    r = client.get("/metrics", headers={"X-Request-ID": "test-request"})
+    assert r.status_code == 200
+    assert r.headers["X-Request-ID"] == "test-request"
+    assert "clip_http_requests_total" in r.text
+
+
 def test_search_text(client):
     r = client.post("/api/v1/search/text", json={"query": "blue shirt", "top_k": 2})
     assert r.status_code == 200

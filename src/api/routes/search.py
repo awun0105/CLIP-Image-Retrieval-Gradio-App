@@ -5,6 +5,7 @@ from __future__ import annotations
 import io
 import logging
 from concurrent.futures import ThreadPoolExecutor
+from time import perf_counter
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
@@ -20,6 +21,7 @@ from api.schemas import (
 from api.security import read_upload_bytes, require_api_key
 from config import Settings
 from core.image_service import ImageService
+from core.metrics import SEARCH_LATENCY
 from core.schemas import SearchMode, SearchResult
 from core.search import SearchService
 
@@ -71,6 +73,7 @@ def search_by_text(
     search_service: Annotated[SearchService, Depends(get_search_service)],
     image_service: Annotated[ImageService, Depends(get_image_service)],
 ) -> SearchResponse:
+    start = perf_counter()
     try:
         results = search_service.search_by_text(
             request.query,
@@ -80,6 +83,8 @@ def search_by_text(
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    finally:
+        SEARCH_LATENCY.labels("text", request.search_mode.value).observe(perf_counter() - start)
     return _to_response(results, image_service, request.query)
 
 
@@ -97,6 +102,7 @@ async def search_by_image(
         raise HTTPException(status_code=400, detail="top_k must be in [1, 100]")
     data = await read_upload_bytes(file, settings)
     try:
+        start = perf_counter()
         image = await run_in_threadpool(_decode_image, data, settings.max_image_pixels)
     except Exception as exc:
         if isinstance(exc, HTTPException):
@@ -109,4 +115,5 @@ async def search_by_image(
         search_mode,
         hnsw_ef,
     )
+    SEARCH_LATENCY.labels("image", search_mode.value).observe(perf_counter() - start)
     return await run_in_threadpool(_to_response, results, image_service, None)

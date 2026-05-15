@@ -2,20 +2,16 @@
 
 from __future__ import annotations
 
-import logging
-
 from redis import Redis
 from rq import Queue, Worker
 
 from api.dependencies import get_settings
+from core.logging import configure_logging
 
 
 def main() -> None:
     settings = get_settings()
-    logging.basicConfig(
-        level=settings.log_level.upper(),
-        format="%(asctime)s %(levelname)s %(name)s %(message)s",
-    )
+    configure_logging(settings)
     redis = Redis.from_url(settings.redis_url, decode_responses=True)
     queue = Queue(settings.indexing_queue_name, connection=redis)
     worker = Worker([queue], connection=redis)
