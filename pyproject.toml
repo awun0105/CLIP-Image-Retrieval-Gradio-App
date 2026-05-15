@@ -46,10 +46,11 @@ legacy = [
 [project.scripts]
 clip-retrieval = "server:main"
 clip-index-worker = "worker:main"
+clip-index-enqueue = "index_enqueue:main"
 
 [tool.setuptools]
 package-dir = { "" = "src" }
-py-modules = ["server", "config", "worker"]
+py-modules = ["server", "config", "worker", "index_enqueue"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
