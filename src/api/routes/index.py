@@ -10,12 +10,13 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from api.dependencies import get_indexing_service, get_vector_store
 from api.schemas import IndexJobResponse, IndexRequest, IndexStartResponse
+from api.security import require_api_key
 from core.indexing import IndexingJob, IndexingJobAlreadyRunning, IndexingService
 from db.vector_store import VectorStore
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/v1/index", tags=["index"])
+router = APIRouter(prefix="/api/v1/index", tags=["index"], dependencies=[Depends(require_api_key)])
 
 
 def _job_response(job: IndexingJob, vector_store: VectorStore) -> IndexJobResponse:

@@ -117,6 +117,102 @@ def test_search_image(client):
     assert body["total"] == 1
 
 
+def test_api_key_auth_for_api_routes(settings, vector_store, fake_embedding_service, fake_object_store):
+    settings.enable_api_key_auth = True
+    settings.api_key = "secret"
+    _seed(vector_store)
+    search_service = SearchService(fake_embedding_service, vector_store)
+    image_service = ImageService(fake_object_store)
+
+    app = create_app()
+    app.dependency_overrides[get_settings] = lambda: settings
+    app.dependency_overrides[get_vector_store] = lambda: vector_store
+    app.dependency_overrides[get_search_service] = lambda: search_service
+    app.dependency_overrides[get_image_service] = lambda: image_service
+
+    with TestClient(app) as c:
+        missing = c.post("/api/v1/search/text", json={"query": "blue shirt"})
+        assert missing.status_code == 401
+
+        invalid = c.post(
+            "/api/v1/search/text",
+            json={"query": "blue shirt"},
+            headers={"X-API-Key": "wrong"},
+        )
+        assert invalid.status_code == 401
+
+        valid = c.post(
+            "/api/v1/search/text",
+            json={"query": "blue shirt"},
+            headers={"X-API-Key": "secret"},
+        )
+        assert valid.status_code == 200
+
+
+def test_search_image_rejects_large_upload(
+    settings,
+    vector_store,
+    fake_embedding_service,
+    fake_object_store,
+):
+    settings.max_upload_bytes = 8
+    _seed(vector_store)
+    search_service = SearchService(fake_embedding_service, vector_store)
+    image_service = ImageService(fake_object_store)
+
+    app = create_app()
+    app.dependency_overrides[get_settings] = lambda: settings
+    app.dependency_overrides[get_vector_store] = lambda: vector_store
+    app.dependency_overrides[get_search_service] = lambda: search_service
+    app.dependency_overrides[get_image_service] = lambda: image_service
+
+    buf = io.BytesIO(b"x" * 16)
+    with TestClient(app) as c:
+        r = c.post(
+            "/api/v1/search/image",
+            files={"file": ("large.png", buf, "image/png")},
+        )
+    assert r.status_code == 413
+
+
+def test_search_image_rejects_invalid_content_type(client):
+    r = client.post(
+        "/api/v1/search/image",
+        files={"file": ("test.txt", io.BytesIO(b"not an image"), "text/plain")},
+    )
+    assert r.status_code == 415
+
+
+def test_search_image_rejects_large_decoded_image(
+    settings,
+    vector_store,
+    fake_embedding_service,
+    fake_object_store,
+):
+    settings.max_image_pixels = 1
+    _seed(vector_store)
+    search_service = SearchService(fake_embedding_service, vector_store)
+    image_service = ImageService(fake_object_store)
+
+    app = create_app()
+    app.dependency_overrides[get_settings] = lambda: settings
+    app.dependency_overrides[get_vector_store] = lambda: vector_store
+    app.dependency_overrides[get_search_service] = lambda: search_service
+    app.dependency_overrides[get_image_service] = lambda: image_service
+
+    img = Image.new("RGB", (8, 8), color="red")
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    buf.seek(0)
+
+    with TestClient(app) as c:
+        r = c.post(
+            "/api/v1/search/image",
+            files={"file": ("test.png", buf, "image/png")},
+        )
+    assert r.status_code == 413
+
+
 def test_index_job_api(settings, vector_store, fake_embedding_service, fake_object_store, tmp_path):
     img = Image.new("RGB", (8, 8), color="red")
     img.save(tmp_path / "api_index.jpg")

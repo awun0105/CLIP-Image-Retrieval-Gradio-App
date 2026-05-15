@@ -11,23 +11,31 @@ from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from PIL import Image
 from starlette.concurrency import run_in_threadpool
 
-from api.dependencies import get_image_service, get_search_service
+from api.dependencies import get_image_service, get_search_service, get_settings
 from api.schemas import (
     SearchResponse,
     SearchResultItem,
     TextSearchRequest,
 )
+from api.security import read_upload_bytes, require_api_key
+from config import Settings
 from core.image_service import ImageService
 from core.schemas import SearchMode, SearchResult
 from core.search import SearchService
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/v1/search", tags=["search"])
+router = APIRouter(prefix="/api/v1/search", tags=["search"], dependencies=[Depends(require_api_key)])
 
 
-def _decode_image(data: bytes) -> Image.Image:
-    return Image.open(io.BytesIO(data)).convert("RGB")
+def _decode_image(data: bytes, max_image_pixels: int) -> Image.Image:
+    with Image.open(io.BytesIO(data)) as image:
+        if max_image_pixels > 0 and image.width * image.height > max_image_pixels:
+            raise HTTPException(
+                status_code=413,
+                detail=f"Decoded image exceeds MAX_IMAGE_PIXELS={max_image_pixels}",
+            )
+        return image.convert("RGB")
 
 
 def _to_response(
@@ -78,6 +86,7 @@ def search_by_text(
 @router.post("/image", response_model=SearchResponse)
 async def search_by_image(
     file: Annotated[UploadFile, File(...)],
+    settings: Annotated[Settings, Depends(get_settings)],
     search_service: Annotated[SearchService, Depends(get_search_service)],
     image_service: Annotated[ImageService, Depends(get_image_service)],
     top_k: int = 5,
@@ -86,10 +95,12 @@ async def search_by_image(
 ) -> SearchResponse:
     if top_k < 1 or top_k > 100:
         raise HTTPException(status_code=400, detail="top_k must be in [1, 100]")
-    data = await file.read()
+    data = await read_upload_bytes(file, settings)
     try:
-        image = await run_in_threadpool(_decode_image, data)
+        image = await run_in_threadpool(_decode_image, data, settings.max_image_pixels)
     except Exception as exc:
+        if isinstance(exc, HTTPException):
+            raise exc
         raise HTTPException(status_code=400, detail=f"Invalid image: {exc}") from exc
     results = await run_in_threadpool(
         search_service.search_by_image,
