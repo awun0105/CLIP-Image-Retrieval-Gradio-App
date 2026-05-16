@@ -22,7 +22,6 @@ from core.schemas import SearchMode
 logger = logging.getLogger(__name__)
 
 VECTOR_DIM = 512  # CLIP ViT-B/16 latent dim
-BATCH_SIZE = 100
 
 
 class VectorStore:
@@ -97,10 +96,11 @@ class VectorStore:
         captions: dict[str, str] | None = None,
         metadata_by_key: dict[str, dict] | None = None,
     ) -> None:
-        """Upsert ``(key, embedding)`` pairs in batches of ``BATCH_SIZE``."""
+        """Upsert ``(key, embedding)`` pairs in configured Qdrant write batches."""
         captions = captions or {}
         metadata_by_key = metadata_by_key or {}
         points: list[PointStruct] = []
+        batch_size = max(1, self.settings.qdrant_upsert_batch_size)
         for key, emb in zip(object_keys, embeddings, strict=False):
             filename = key.split("/")[-1]
             caption = captions.get(filename)
@@ -117,7 +117,7 @@ class VectorStore:
                     payload=payload,
                 )
             )
-            if len(points) >= BATCH_SIZE:
+            if len(points) >= batch_size:
                 self.client.upsert(collection_name=self.collection_name, points=points)
                 points = []
 

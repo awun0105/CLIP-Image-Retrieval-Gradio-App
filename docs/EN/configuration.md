@@ -159,6 +159,7 @@ abuse. They are configurable so high-quality images can still be allowed.
 | `QDRANT_HNSW_EF` | `128` | Query-time HNSW accuracy/speed parameter. Higher can improve recall but may increase latency. |
 | `QDRANT_INDEXING_THRESHOLD` | `5000` | Qdrant optimizer threshold for vector indexing. |
 | `QDRANT_FULL_SCAN_THRESHOLD` | `5000` | Qdrant HNSW config threshold for full scan behavior. |
+| `QDRANT_UPSERT_BATCH_SIZE` | `100` | Number of Qdrant points sent per upsert request. This is separate from `INGEST_BATCH_SIZE`, which controls CLIP image encoding batches. |
 | `SEARCH_MODE_DEFAULT` | `ann` | Default search mode: `ann`, `exact`, or `ann_indexed_only`. |
 
 Search modes:

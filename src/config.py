@@ -31,6 +31,7 @@ class Settings(BaseSettings):
     qdrant_hnsw_ef: int = 128
     qdrant_indexing_threshold: int = 5000
     qdrant_full_scan_threshold: int = 5000
+    qdrant_upsert_batch_size: int = 100
     search_mode_default: str = "ann"
 
     # Indexing performance
