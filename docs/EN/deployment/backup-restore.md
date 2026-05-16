@@ -64,8 +64,7 @@ If Redis is lost:
 - image objects remain in MinIO;
 - re-enqueue indexing to reconcile state.
 
-This is acceptable for a production MVP because indexing is idempotent and
-incremental.
+This is recoverable because indexing is idempotent and incremental.
 
 ## Secrets And Env
 

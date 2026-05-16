@@ -1,33 +1,40 @@
 # Project Overview
 
 CLIP Fashion-Products Image Retrieval Engine is a multimodal retrieval service
-for fashion product catalogs. It lets users search a collection by text
-description or by reference image.
+for fashion product catalogs. It lets clients search an indexed image
+collection with either text or a reference image.
 
-The project is best described as:
+The service combines:
 
-> A production-oriented MVP visual search engine module for fashion products,
-> built with CLIP, FastAPI, Gradio, Qdrant, MinIO, Redis/RQ, and Prometheus.
+- a FastAPI HTTP API;
+- a Gradio UI mounted at `/ui`;
+- a fine-tuned CLIP embedding model;
+- Qdrant for vector search;
+- MinIO for image object storage;
+- Redis/RQ for background indexing jobs;
+- Prometheus metrics and structured logs.
 
-It can be integrated into a larger system such as:
+## Where This Service Fits
 
-- an e-commerce catalog;
-- a fashion discovery application;
-- an internal product search tool;
-- a recommendation or visual similarity service.
+This project is a retrieval service, not a complete commerce platform. In a
+larger system, it would usually sit beside product catalog, inventory, user, and
+recommendation services.
 
-It is not a full platform by itself. It does not include customer accounts,
-admin panels, billing, product inventory management, or multi-tenant access
-control.
+Typical integrations:
 
-## Core Capabilities
+- an e-commerce catalog calls the search API to support visual discovery;
+- an internal product tool indexes new product images nightly;
+- a recommendation workflow uses image-to-image search to find similar items;
+- a QA or merchandising workflow checks whether visually similar products are
+  already present in the catalog.
+
+## Capabilities
 
 ### Text-To-Image Search
 
 The user sends a text query such as `red dress` or `black leather jacket`.
-The system embeds that text using a fine-tuned CLIP model, searches Qdrant for
-nearby image vectors, and returns ranked images with scores and presigned MinIO
-URLs.
+The system embeds that text using CLIP, searches Qdrant for nearby image
+vectors, and returns ranked images with scores and presigned MinIO URLs.
 
 ### Image-To-Image Search
 
@@ -51,47 +58,50 @@ system repairs MinIO without re-encoding the image.
 
 ### Background Indexing Jobs
 
-Indexing can take a long time for large catalogs. The production path avoids
-long-running HTTP requests:
+Indexing can take longer than a normal HTTP request timeout. The service starts
+indexing as a job:
 
 1. API receives an indexing request.
 2. API creates a job and returns `202 Accepted` with `job_id`.
-3. Redis/RQ stores the job.
+3. Redis/RQ stores the job in the production stack.
 4. A worker process executes indexing in the background.
 5. Client polls `GET /api/v1/index/{job_id}` for status and counters.
 
 For local development, the same API can use an in-memory job backend.
 
-### Operability
+### Runtime Operations
 
-The service includes minimum production operations features:
+The service includes operational interfaces:
 
 - API key authentication for API routes;
 - configurable upload limits and image size guardrails;
-- `/health` for readiness-style checks;
+- `/health` for service checks;
 - `/metrics` for Prometheus;
-- structured JSON logs in production;
+- structured JSON logs;
 - Docker production compose stack;
 - backup/restore runbooks;
 - scheduled ingestion guidance;
 - retrieval evaluation and performance benchmark scripts.
 
-## Production-Oriented MVP Meaning
+## Scope And Boundaries
 
-This project is stronger than a simple proof of concept because it includes the
-core serving, indexing, storage, background job, monitoring, testing, and
-deployment pieces needed to run as a small production service.
+Included:
 
-It is still an MVP because some enterprise-grade topics are intentionally out of
-scope:
+- image retrieval API;
+- mounted demo/operator UI;
+- local and production Docker Compose workflows;
+- background indexing worker;
+- Qdrant, MinIO, Redis, and Prometheus integration;
+- evaluation and benchmark tooling.
 
-- Kubernetes/ECS deployment manifests;
-- managed secret storage such as Vault or cloud secret managers;
-- centralized log storage such as Loki, ELK, or CloudWatch;
-- alert rules and incident escalation;
-- GPU-specific production model serving such as Triton/TorchServe;
+Not included:
+
+- user account management;
+- product inventory management;
+- billing or payments;
 - multi-tenant authorization;
-- a large labeled benchmark dataset with release gates.
-
-For a portfolio project or a single-service MVP, the current implementation is
-complete enough to demonstrate production engineering maturity.
+- Kubernetes/ECS manifests;
+- managed secret storage;
+- centralized log aggregation;
+- alert rules;
+- dedicated GPU model server.

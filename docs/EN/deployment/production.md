@@ -1,6 +1,7 @@
 # Production Deployment Guide
 
-This guide runs the V3 production-oriented Docker Compose stack.
+This guide runs the V3 Docker Compose stack for local production simulation or a
+single-VPS deployment.
 
 You can use it in two ways:
 
@@ -9,8 +10,9 @@ You can use it in two ways:
 - **Single-VPS deployment**: copy the repo to a VPS and run the same compose
   stack there.
 
-The stack is not a full cloud platform. It is the minimum production-grade MVP
-runtime for this service.
+The stack is not a full cloud platform. It is a single-host container runtime
+for the retrieval API, worker, queue, vector database, object storage, and
+metrics scraper.
 
 ## Services
 
@@ -48,7 +50,7 @@ ENABLE_API_KEY_AUTH=true
 API_KEY=<generated-api-key>
 ```
 
-Set MinIO credentials. For a simple MVP deployment, use the same root
+Set MinIO credentials. For a simple single-host deployment, use the same root
 credentials for the app:
 
 ```env
@@ -241,7 +243,7 @@ API and worker must use the same Redis URL and queue name.
 Use `MINIO_ROOT_USER` and `MINIO_ROOT_PASSWORD` for the console. Use
 `MINIO_ACCESS_KEY` and `MINIO_SECRET_KEY` for the app/worker.
 
-For a simple MVP setup, they can be the same pair.
+For a simple single-host setup, they can be the same pair.
 
 ## Release Checklist
 

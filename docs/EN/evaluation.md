@@ -1,11 +1,12 @@
 # Evaluation And Benchmarking
 
-Evaluation answers two different questions:
+Evaluation is split into four questions:
 
-1. **Does the system work correctly?**
-2. **Does the retrieval quality and performance meet expectations?**
-
-A production-oriented retrieval project needs both.
+1. Does the code behave correctly?
+2. Does retrieval return relevant images?
+3. Does search/indexing meet latency and throughput targets for the deployment
+   environment?
+4. Can operators inspect health, metrics, logs, and job status?
 
 ## Evaluation Dimensions
 
@@ -15,95 +16,104 @@ A production-oriented retrieval project needs both.
 | Retrieval quality | Do text queries return relevant images? | `scripts/evaluate_retrieval.py` |
 | Search performance | How fast is text search under concurrency? | `scripts/benchmark_search.py` |
 | Indexing performance | How long does ingestion take? | `scripts/benchmark_indexing.py` |
-| Operability | Can we inspect health, logs, metrics, and job status? | `/health`, `/metrics`, logs |
+| Operability | Can the service be inspected while running? | `/health`, `/metrics`, logs, job API |
 
-## Manual vs Automated Evaluation
+## Included Evaluation Dataset
 
-### Manual Evaluation
+The repository includes:
 
-Manual evaluation means a human tries queries and visually inspects results.
+```text
+evaluation/deepfashion_weak_labels.jsonl
+```
 
-Use it for:
+This file is generated from the real local DeepFashion dataset shape:
 
-- quick demo checks;
-- UI acceptance;
-- sanity-checking weird queries;
-- verifying images load correctly.
+- filenames under `DeepFashion/images`;
+- category labels encoded in filenames such as `WOMEN-Dresses` or
+  `MEN-Shirts_Polos`;
+- caption availability from `DeepFashion/captions.json`.
 
-Manual evaluation is easy, but subjective. It is not enough for release
-confidence.
+It contains 30 caption-to-image text queries. Each query uses a real caption
+from `DeepFashion/captions.json`, and the relevant image is the source image for
+that caption.
 
-### Automated Evaluation
+This is a **weak-label** evaluation set. It is useful for repeatable baseline
+checks, but it is not the same as a human-labeled benchmark. A result can be
+visually relevant even if it is not listed in `relevant`, and a category match
+does not guarantee perfect semantic relevance.
 
-Automated evaluation uses a query set with known relevant images.
+The first recorded run is stored at:
 
-Use it for:
-
-- comparing ANN vs exact search;
-- checking if a model/indexing change made quality worse;
-- generating repeatable metrics for portfolio or releases;
-- regression testing retrieval behavior over time.
+```text
+evaluation/reports/deepfashion_baseline_2026-05-16.md
+```
 
 ## Query Set Format
 
-Create a JSONL file. Each line is one query case:
+Each JSONL line is one query case:
 
 ```jsonl
-{"id": "q1", "query": "red dress", "relevant": ["images/red_dress_1.jpg", "images/red_dress_2.jpg"]}
-{"id": "q2", "query": "black leather jacket", "relevant": ["images/jacket_1.jpg"]}
+{"id":"df_caption_01","query":"The shirt this woman wears has short sleeves...","relevant":["images/WOMEN-Dresses-id_00000002-02_1_front.jpg"]}
 ```
 
 Fields:
 
 | Field | Meaning |
 |---|---|
-| `id` | Stable query id for humans and reports. |
-| `query` | Text query sent to `/api/v1/search/text`. |
-| `relevant` | List of Qdrant/MinIO image paths that should be considered correct. |
+| `id` | Stable query id for reports. |
+| `query` | Text sent to `/api/v1/search/text`. |
+| `relevant` | Expected relevant `image_path` values returned by the API. |
 
-Important: `relevant` values must match returned `image_path` values, usually
-like `images/<filename>.jpg`.
+`relevant` values must match returned `image_path` exactly.
 
 ## Retrieval Metrics
 
 ### Recall@K
 
-Recall@K asks:
+Recall@K asks how many relevant images were found in the first K results.
 
-> Out of all correct images, how many did the system find in the top K?
+If a query has 10 relevant images and top 10 contains 6 of them:
 
-Example: if there are 4 relevant images and top 10 contains 3 of them,
-`Recall@10 = 3 / 4 = 0.75`.
+```text
+Recall@10 = 6 / 10 = 0.60
+```
 
-This is usually the most important metric for image retrieval.
+For retrieval systems, Recall@K is usually the first quality metric to inspect.
 
 ### Precision@K
 
-Precision@K asks:
+Precision@K asks how many of the first K returned images are listed as relevant.
 
-> Out of the top K returned images, how many are correct?
+If top 10 contains 6 relevant images:
 
-Example: if top 10 contains 3 correct images, `Precision@10 = 3 / 10 = 0.30`.
+```text
+Precision@10 = 6 / 10 = 0.60
+```
+
+With weak labels, precision can look artificially low because visually similar
+items outside the relevant list are counted as incorrect.
 
 ### mAP@K
 
-Mean Average Precision rewards correct results appearing earlier in the ranking.
-If two systems find the same relevant images but one puts them near the top,
-that system receives a higher mAP.
+Mean Average Precision rewards relevant images appearing earlier in the result
+list. A system that returns relevant images at ranks 1, 2, and 3 scores better
+than one that returns them at ranks 8, 9, and 10.
 
 ### nDCG@K
 
-Normalized Discounted Cumulative Gain also rewards ranking quality. Correct
-items near rank 1 count more than correct items near rank K.
+Normalized Discounted Cumulative Gain is another ranking quality metric.
+Relevant images near the top contribute more than relevant images near rank K.
 
 ## Run Retrieval Evaluation
+
+Before running evaluation, the image set must be indexed into Qdrant and MinIO.
 
 ANN mode:
 
 ```bash
 uv run python scripts/evaluate_retrieval.py \
   --base-url http://localhost:8000 \
-  --queries eval_queries.jsonl \
+  --queries evaluation/deepfashion_weak_labels.jsonl \
   --top-k 10 \
   --search-mode ann \
   --api-key "$API_KEY"
@@ -114,28 +124,95 @@ Exact baseline:
 ```bash
 uv run python scripts/evaluate_retrieval.py \
   --base-url http://localhost:8000 \
-  --queries eval_queries.jsonl \
+  --queries evaluation/deepfashion_weak_labels.jsonl \
   --top-k 10 \
   --search-mode exact \
   --api-key "$API_KEY"
 ```
 
-Compare ANN vs exact. If exact performs much better, ANN/index settings may be
-too aggressive or the index may not be fully built.
+If API key auth is disabled, omit `--api-key`.
 
 Optional HNSW query parameter:
 
 ```bash
 uv run python scripts/evaluate_retrieval.py \
   --base-url http://localhost:8000 \
-  --queries eval_queries.jsonl \
+  --queries evaluation/deepfashion_weak_labels.jsonl \
   --top-k 10 \
   --search-mode ann \
   --hnsw-ef 256 \
   --api-key "$API_KEY"
 ```
 
-Higher `hnsw_ef` may improve recall but can increase latency.
+Higher `hnsw_ef` can improve ANN recall but may increase latency.
+
+## Suggested Acceptance Criteria
+
+These are starter criteria for this repository. Adjust them for the actual
+hardware, dataset size, and product expectations.
+
+### Functional
+
+Required:
+
+```bash
+uv run pytest tests/ -v
+uv run ruff check src/ tests/ scripts/
+uv run mypy src tests
+```
+
+All commands should pass before trusting retrieval or benchmark results.
+
+### Retrieval Quality
+
+Use exact search as the reference baseline:
+
+- `exact` tells you how well the model/data/query set behave without ANN
+  approximation loss.
+- `ann` tells you how production search behaves with the configured Qdrant
+  search parameters.
+
+Starter thresholds for future runs of this weak-label set:
+
+| Check | Suggested target |
+|---|---:|
+| Exact `recall_at_k` | `>= 0.50` after improving labels, or track against the current baseline |
+| ANN `recall_at_k` | within `0.10` absolute of exact recall |
+| ANN `ndcg_at_k` | within `0.10` absolute of exact nDCG |
+| API errors during evaluation | `0` |
+
+The first recorded weak-label baseline did not meet the starter recall target.
+Use that result as a baseline, not as a final quality gate. Before treating
+these thresholds as release requirements, improve the query set with multiple
+human-approved relevant images per query.
+
+If exact recall is low, inspect:
+
+- whether the query set labels are too narrow;
+- whether the indexed dataset matches the query set;
+- whether image paths in `relevant` match returned `image_path`;
+- whether the CLIP model is appropriate for the category/query wording.
+
+If exact is acceptable but ANN is much worse, inspect:
+
+- `QDRANT_HNSW_EF`;
+- Qdrant index build state;
+- `SEARCH_MODE_DEFAULT`;
+- whether `ann_indexed_only` is excluding non-indexed vectors.
+
+### Performance
+
+Performance targets must be recorded with hardware and config. A CPU laptop,
+CPU Docker container, and GPU server have different expected latencies.
+
+Starter targets for a small single-machine deployment:
+
+| Check | Suggested target |
+|---|---:|
+| Search benchmark errors | `0` |
+| Search p95 latency after model warm-up | owner-defined, record hardware |
+| Indexing `failed_count` on clean dataset | `0` |
+| Second unchanged indexing run | mostly `skipped_count` |
 
 ## Search Benchmark
 
@@ -149,21 +226,10 @@ uv run python scripts/benchmark_search.py \
   --api-key "$API_KEY"
 ```
 
-The report includes:
+The report includes request count, errors, throughput, p50/p95/p99 latency, and
+mean latency.
 
-- total requests;
-- errors;
-- throughput in requests/second;
-- p50/p95/p99 latency;
-- mean latency.
-
-Use this after changes to:
-
-- model/device;
-- Qdrant search settings;
-- API route behavior;
-- Docker resource limits;
-- infrastructure.
+Run one warm-up search before benchmarking so the model is already loaded.
 
 ## Indexing Benchmark
 
@@ -174,58 +240,37 @@ uv run python scripts/benchmark_indexing.py \
   --api-key "$API_KEY"
 ```
 
-The benchmark:
+The benchmark starts an indexing job, polls until completion/failure, and
+reports counters, duration, and images per minute.
 
-1. Starts an indexing job.
-2. Polls until completion or failure.
-3. Reports counters, duration, and images/minute.
+Counter interpretation:
 
-Interpret counters:
-
-- high `skipped_count`: incremental indexing is working for unchanged data;
-- high `indexed_count`: new catalog ingestion;
+- high `skipped_count`: unchanged files are skipped correctly;
+- high `indexed_count`: many new files were inserted;
 - high `updated_count`: many existing files changed;
 - high `uploaded_only_count`: MinIO repair happened without CLIP re-encoding;
-- high `failed_count`: inspect logs and input files.
+- high `failed_count`: inspect worker logs and input data.
 
-## CI vs Release Evaluation
+## Baseline Report Template
 
-CI should run:
+Use:
 
-```bash
-uv run pytest tests/ -v
-uv run ruff check src/ tests/ scripts/
-uv run mypy src tests
-docker build -t clip-image-retrieval:v3-smoke .
+```text
+evaluation/reports/deepfashion_baseline_template.md
 ```
 
-Full retrieval evaluation should run:
+Fill it only with real command outputs. Do not invent metric values when the
+service was not running or the dataset was not indexed.
 
-- before releases;
-- after model changes;
-- after Qdrant search/index parameter changes;
-- after indexing pipeline changes;
-- after major infrastructure changes.
+Required context for every report:
 
-## What Exists And What Is Still Missing
-
-Already implemented:
-
-- unit/API tests;
-- retrieval quality script;
-- search benchmark;
-- indexing benchmark;
-- exact vs ANN comparison capability;
-- metrics/logs for runtime observation.
-
-Still useful for a stricter production release:
-
-- a larger labeled evaluation dataset;
-- versioned evaluation reports;
-- minimum metric thresholds as release gates;
-- dashboard for search/indexing latency over time;
-- load tests that include image search, not only text search;
-- GPU vs CPU benchmark comparison if deploying GPU inference.
-
-For portfolio usage, a small curated query set plus benchmark results is enough
-to demonstrate that the project is measurable and not only visually demoed.
+- date;
+- git commit;
+- query set path;
+- indexed image count;
+- hardware;
+- base URL;
+- search config;
+- ANN and exact retrieval metrics;
+- benchmark results;
+- pass/fail notes.

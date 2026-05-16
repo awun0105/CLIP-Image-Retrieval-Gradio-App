@@ -2,19 +2,15 @@
 
 # CLIP Fashion-Products Image Retrieval Engine
 
-A production-oriented MVP image retrieval service for fashion product catalogs.
-It uses a fine-tuned CLIP model to support text-to-image and image-to-image
-search, stores vectors in Qdrant, stores image objects in MinIO, and runs
-indexing as background jobs through Redis/RQ in the production stack.
+A CLIP-based image retrieval service for fashion product catalogs. It supports
+text-to-image and image-to-image search, stores vectors in Qdrant, stores image
+objects in MinIO, and runs indexing as background jobs through Redis/RQ in the
+production stack.
 
-This repository can be read as either:
-
-- a portfolio project showing an end-to-end AI retrieval service; or
-- a reusable visual-search module that can be integrated into a larger
-  e-commerce, product catalog, or fashion discovery system.
-
-It is not a full SaaS platform. It does not include billing, user accounts,
-multi-tenant authorization, Kubernetes manifests, or managed cloud deployment.
+The repository provides the retrieval service layer: API, UI, indexing worker,
+storage adapters, metrics, deployment configuration, and evaluation tooling. It
+does not include unrelated product-platform features such as user accounts,
+billing, inventory management, or multi-tenant authorization.
 
 ## Links
 
@@ -60,7 +56,7 @@ multi-tenant authorization, Kubernetes manifests, or managed cloud deployment.
   new or changed files by checking file metadata and SHA256 content hashes.
 - **Background ingestion**: submit indexing jobs through the API or CLI; in the
   production stack Redis/RQ runs the long work outside the API request path.
-- **Production MVP operations**: API key auth, upload guardrails, Prometheus
+- **Runtime operations**: API key auth, upload guardrails, Prometheus
   metrics, structured logs, Docker production compose, CI, backup/restore docs,
   and evaluation/benchmark tools.
 
@@ -108,6 +104,7 @@ For full details, start with the documentation map:
 │   ├── worker.py         # clip-index-worker RQ worker
 │   └── index_enqueue.py  # clip-index-enqueue CLI
 ├── scripts/              # Migration, evaluation, benchmark utilities
+├── evaluation/           # Weak-label query set and report templates
 ├── tests/                # Unit/API tests with fakes and in-memory Qdrant
 ├── docs/
 │   ├── README.md         # Documentation map
@@ -203,12 +200,12 @@ API guide: [docs/EN/api.md](docs/EN/api.md)
 
 ## Evaluation And Benchmarking
 
-Evaluate retrieval quality with a labeled JSONL query set:
+Evaluate retrieval quality with the included DeepFashion weak-label query set:
 
 ```bash
 uv run python scripts/evaluate_retrieval.py \
   --base-url http://localhost:8000 \
-  --queries eval_queries.jsonl \
+  --queries evaluation/deepfashion_weak_labels.jsonl \
   --top-k 10 \
   --search-mode ann \
   --api-key "$API_KEY"
@@ -226,6 +223,10 @@ uv run python scripts/benchmark_search.py \
 ```
 
 Evaluation guide: [docs/EN/evaluation.md](docs/EN/evaluation.md)
+
+The included query set is derived from the DeepFashion dataset filenames and is
+intended as a repeatable weak-label baseline, not a human-labeled gold
+benchmark.
 
 ## Development Checks
 

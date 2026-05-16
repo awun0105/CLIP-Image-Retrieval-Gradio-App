@@ -4,6 +4,12 @@ This document explains the main runtime flows through the service.
 
 ## 1. Local Development Startup
 
+This flow is used when a developer runs the API directly from the host machine.
+Only Qdrant and MinIO are started through Docker. The app reads `.env`, builds
+the FastAPI application, mounts Gradio at `/ui`, and listens on port `8000`.
+Because the Python process is outside Docker, it reaches Qdrant and MinIO
+through `localhost` ports exposed by Compose.
+
 ```mermaid
 sequenceDiagram
     autonumber
@@ -29,6 +35,12 @@ Key idea: the Python app runs on the host machine, so it connects to sidecars
 through `localhost`.
 
 ## 2. Production Stack Startup
+
+This flow is used for the production Compose stack. All runtime components run
+inside the same Docker network: API, worker, Redis, Qdrant, MinIO, and
+Prometheus. The API handles HTTP and UI traffic. The worker handles queued
+indexing jobs. Prometheus periodically scrapes the API's `/metrics` endpoint.
+Inside this network, services use Compose names instead of `localhost`.
 
 ```mermaid
 sequenceDiagram
@@ -59,6 +71,12 @@ Key idea: containers communicate by Docker service name:
 - `redis://redis:6379/0`
 
 ## 3. Text Search
+
+Text search is the main read path. The request enters FastAPI, optionally passes
+API key validation, then goes through `SearchService`. The service embeds the
+query with CLIP, searches Qdrant, and converts result object keys into MinIO
+presigned URLs. The client receives ranked images, scores, captions, filenames,
+and URLs that can be opened by the browser.
 
 ```mermaid
 sequenceDiagram
@@ -96,6 +114,12 @@ Foreground search uses the inference gate with priority over background image
 batch indexing.
 
 ## 4. Image Search
+
+Image search follows the same retrieval idea as text search, but the input is a
+multipart image upload. The route first applies upload guardrails so the service
+does not process unsupported or unexpectedly large files. Pillow decodes the
+image into RGB, CLIP embeds it, Qdrant retrieves similar vectors, and the API
+returns MinIO presigned URLs for the ranked results.
 
 ```mermaid
 sequenceDiagram
@@ -135,6 +159,12 @@ Failure behavior:
 
 Memory backend is mainly for local development.
 
+In memory mode, the API process owns both the job registry and the executor.
+The route still returns `202 Accepted` with a `job_id`, so the API shape is the
+same as Redis mode. The difference is durability: if the API process stops, the
+in-memory job state is gone. Use this mode for local development when you do not
+want to run Redis.
+
 ```mermaid
 sequenceDiagram
     autonumber
@@ -164,6 +194,11 @@ local development but not ideal for production.
 
 Redis backend is the production path.
 
+In Redis mode, the API only validates the request, writes job metadata, and
+enqueues work. The RQ worker process receives the job and executes
+`IndexingService.index_directory`. This keeps long ingestion work outside the
+HTTP request path and lets clients poll job status independently.
+
 ```mermaid
 sequenceDiagram
     autonumber
@@ -192,6 +227,12 @@ the worker, so client/proxy timeouts do not kill the request path.
 
 ## 7. Incremental Indexing Internals
 
+This is the core write path inside `IndexingService`. The pipeline checks cheap
+state first and only performs expensive work when needed. Metadata comparison is
+cheaper than reading the whole file for SHA256. SHA256 is cheaper than CLIP
+inference. CLIP inference and MinIO upload happen only for new or changed
+images. Qdrant is upserted per batch so progress is persisted incrementally.
+
 ```mermaid
 flowchart TD
     A[Iterate image files] --> B[Build object key images/filename]
@@ -215,6 +256,12 @@ This flow avoids repeated CLIP inference for unchanged images and keeps memory
 bounded by batch size.
 
 ## 8. CLI Scheduled Ingestion
+
+Scheduled ingestion uses the same job backend as the API. A cron job, systemd
+timer, or manual shell command calls `clip-index-enqueue`, which creates a Redis
+job. The worker then processes the folder. This avoids embedding deployment
+logic in cron and keeps all ingestion state visible through the same job status
+API.
 
 ```mermaid
 sequenceDiagram
@@ -240,6 +287,12 @@ INDEXING_JOB_BACKEND=redis
 ```
 
 ## 9. Health And Metrics
+
+Health and metrics are operational read paths. `/health` is intended for humans,
+load balancers, and deployment smoke checks. It reports whether the API can read
+basic Qdrant and MinIO state. `/metrics` is intended for Prometheus and exposes
+counters/histograms for request latency, search latency, embedding latency, and
+indexing job outcomes.
 
 `GET /health`:
 
@@ -268,6 +321,11 @@ Metrics include:
 - indexing job terminal counts.
 
 ## 10. Storage Shape
+
+Each indexed image has two persisted representations. MinIO stores the binary
+image object. Qdrant stores the vector and metadata payload. The payload's
+`image_path` points back to the MinIO object key. Search only returns Qdrant
+hits; `ImageService` turns those keys into temporary presigned URLs for clients.
 
 ```mermaid
 flowchart LR

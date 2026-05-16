@@ -5,12 +5,12 @@ environment variables and, when present, a local `.env` file.
 
 ## Which Env File Should I Use?
 
-| File | Committed? | Used For | Notes |
-|---|---:|---|---|
-| `.env.example` | Yes | Local development template | Copy to `.env`. |
-| `.env` | No | Local development real config | Loaded automatically by `Settings`. |
-| `.env.production.example` | Yes | Production template | Copy to `.env.production`. |
-| `.env.production` | No | Production stack real config | Passed to `docker-compose.prod.yml`. |
+| File | Used When | How To Use |
+|---|---|---|
+| `.env.example` | Starting local development | Copy to `.env`, then edit local values if needed. |
+| `.env` | Running the app directly with `make run` | Loaded automatically by `Settings`. Keep it local to your machine. |
+| `.env.production.example` | Preparing Docker production stack config | Copy to `.env.production`, then replace secrets and deployment paths. |
+| `.env.production` | Running `docker-compose.prod.yml` | Passed to Compose by `make prod-*` targets. Keep it local to the server. |
 
 Do not commit `.env` or `.env.production`.
 

@@ -102,11 +102,11 @@ MinIO operations. It calls service classes through dependency injection.
 The Gradio UI is mounted into the same FastAPI app. It reuses the same
 `SearchService` and `ImageService` singletons as the REST API.
 
-This keeps the MVP simple:
+This keeps the runtime simple:
 
 - one Python app process serves API and UI;
 - UI behavior uses the same core retrieval logic as API behavior;
-- fewer deployment moving parts for portfolio/demo usage.
+- fewer deployment moving parts for local usage and small deployments.
 
 Tradeoff: a high-scale product may later split UI and API into separate
 services. The current design keeps that possible because UI logic is already
@@ -130,7 +130,7 @@ Implementation concepts:
 
 Why gate inference? CLIP/PyTorch inference is expensive. Running unbounded
 concurrent inference can exhaust CPU/GPU memory. The gate makes behavior
-predictable for a production MVP and prevents background indexing from fully
+predictable for a single-process service and prevents background indexing from fully
 starving user search requests.
 
 Tradeoff: this is still not a full model-serving system. If many users search
@@ -301,7 +301,7 @@ single VPS.
 - The production Docker image uses CPU PyTorch wheels for reliable, smaller
   builds. GPU production requires a separate GPU image/profile.
 - API key auth is simple shared-secret auth, not full user/role management.
-- Redis/RQ is sufficient for production MVP job handling, but high-scale
+- Redis/RQ provides a simple durable job backend, but high-scale
   deployments may need stronger job orchestration and distributed locks.
 - Gradio UI is mounted in the same app process for simplicity. A larger product
   may split frontend and API.
