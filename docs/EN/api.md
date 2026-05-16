@@ -78,6 +78,12 @@ Fields:
 | `search_mode` | No | `ann`, `exact`, or `ann_indexed_only`. Default `ann`. |
 | `hnsw_ef` | No | Qdrant query-time HNSW parameter, 32 to 512. |
 
+The API accepts text queries up to 500 characters. CLIP has a smaller token
+window than that character limit, so the embedding layer explicitly truncates
+long tokenized queries to the model token limit before inference. Keep user
+queries concise when evaluating retrieval quality; very long descriptions may
+lose trailing details after tokenization.
+
 Example with API key:
 
 ```bash
@@ -202,13 +208,43 @@ Response:
   "uploaded_only_count": 1,
   "failed_count": 0,
   "scanned_count": 113,
-  "collection_info": {},
+  "collection_info": {
+    "name": "fashion_images",
+    "indexed_vectors_count": 10000,
+    "points_count": 10000,
+    "status": "green",
+    "vector_size": 512,
+    "distance": "Cosine",
+    "segments_count": 3,
+    "hnsw_config": {},
+    "optimizer_config": {},
+    "sample_has_vector": true
+  },
   "error": null,
   "created_at": "...",
   "started_at": "...",
   "finished_at": "..."
 }
 ```
+
+`collection_info` is returned only when the job is `completed` or `failed`.
+While a job is `queued` or `running`, it is `null` because the collection state
+is still changing.
+
+Important `collection_info` fields:
+
+| Field | Meaning |
+|---|---|
+| `name` | Qdrant collection name. |
+| `indexed_vectors_count` | Number of vectors Qdrant reports as indexed. |
+| `points_count` | Number of points in the collection. |
+| `status` | Qdrant collection status, usually `green` when healthy. |
+| `vector_size` | Vector dimension, expected to be `512` for CLIP ViT-B/16. |
+| `distance` | Distance metric, expected to be cosine. |
+| `segments_count` | Qdrant segment count, useful for operational checks. |
+| `hnsw_config` | Current HNSW collection config reported by Qdrant. |
+| `optimizer_config` | Current optimizer config reported by Qdrant. |
+| `sample_has_vector` | Whether a sampled point contains a vector payload. |
 
 Job statuses:
 

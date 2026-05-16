@@ -113,6 +113,7 @@ For full details, start with the documentation map:
 │   ├── EN/               # English documentation
 │   ├── VN/               # Vietnamese docs placeholder for a later pass
 │   └── plans/            # Planning notes, not user-facing docs
+├── Source-huggingface/   # Legacy Hugging Face Spaces implementation
 ├── ops/prometheus/       # Prometheus scrape config
 ├── docker-compose.yml    # Local/simple compose stack
 ├── docker-compose.prod.yml
@@ -225,6 +226,7 @@ uv run python scripts/benchmark_search.py \
 ```
 
 Evaluation guide: [docs/EN/evaluation.md](docs/EN/evaluation.md)
+Maintenance scripts guide: [docs/EN/scripts.md](docs/EN/scripts.md)
 
 The included query set is derived from the DeepFashion dataset filenames and is
 intended as a repeatable weak-label baseline, not a human-labeled gold

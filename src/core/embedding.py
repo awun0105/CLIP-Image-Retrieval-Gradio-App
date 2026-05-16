@@ -39,6 +39,19 @@ def _as_tensor(output) -> torch.Tensor:
     )
 
 
+def _tokenizer_max_length(tokenizer: CLIPTokenizer) -> int:
+    """Return a practical CLIP text token limit.
+
+    Some tokenizer instances expose very large sentinel values when no explicit
+    model max length is configured. CLIP text encoders are commonly limited to
+    77 tokens, so use that as the fallback.
+    """
+    max_length = getattr(tokenizer, "model_max_length", None)
+    if isinstance(max_length, int) and 0 < max_length < 100_000:
+        return max_length
+    return 77
+
+
 class EmbeddingService:
     """Wrap a HuggingFace CLIP model behind a lazy, side-effect-free API."""
 
@@ -106,7 +119,12 @@ class EmbeddingService:
         model = self._model
 
         def _infer():
-            inputs = tokenizer(text, return_tensors="pt").to(self.device)
+            inputs = tokenizer(
+                text,
+                return_tensors="pt",
+                truncation=True,
+                max_length=_tokenizer_max_length(tokenizer),
+            ).to(self.device)
             return model.get_text_features(**inputs)
 
         output = self._run_with_inference_gate(_infer, foreground=True, kind="text")

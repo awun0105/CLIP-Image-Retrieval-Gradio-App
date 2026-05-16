@@ -11,10 +11,11 @@ Read in this order if you are new to the project:
 5. [Local development](local-development.md)
 6. [Production deployment](deployment/production.md)
 7. [API reference](api.md)
-8. [Evaluation](evaluation.md)
-9. [Operations](operations.md)
-10. [Scheduled ingestion](deployment/scheduled-ingestion.md)
-11. [Backup and restore](deployment/backup-restore.md)
+8. [Maintenance scripts](scripts.md)
+9. [Evaluation](evaluation.md)
+10. [Operations](operations.md)
+11. [Scheduled ingestion](deployment/scheduled-ingestion.md)
+12. [Backup and restore](deployment/backup-restore.md)
 
 ## Files
 
@@ -27,6 +28,7 @@ Read in this order if you are new to the project:
 | [local-development.md](local-development.md) | Step-by-step local setup for coding and debugging. |
 | [deployment/production.md](deployment/production.md) | Step-by-step production Docker Compose setup for local production simulation or a VPS. |
 | [api.md](api.md) | API endpoints, request/response examples, status codes, and auth behavior. |
+| [scripts.md](scripts.md) | Maintenance scripts for migration, Qdrant config updates, MinIO upload, evaluation, and benchmarks. |
 | [evaluation.md](evaluation.md) | Included weak-label query set, retrieval quality criteria, benchmark tools, and result template. |
 | [operations.md](operations.md) | Health, metrics, logs, job status, and common operational checks. |
 | [deployment/scheduled-ingestion.md](deployment/scheduled-ingestion.md) | CLI, cron, and systemd examples for automated indexing. |

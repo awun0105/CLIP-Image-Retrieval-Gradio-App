@@ -83,6 +83,23 @@ The service includes operational interfaces:
 - scheduled ingestion guidance;
 - retrieval evaluation and performance benchmark scripts.
 
+## Legacy Hugging Face Space Source
+
+`Source-huggingface/` contains the older Hugging Face Spaces implementation. It
+has its own `app.py`, `db.py`, `requirements.txt`, and Space metadata because it
+was designed to run as a compact standalone demo on Hugging Face.
+
+In the current V3 codebase, that folder is reference/legacy source, not the main
+application runtime. The maintained service entrypoints are:
+
+- `src/server.py` / `uv run clip-retrieval` for FastAPI + Gradio;
+- `src/worker.py` / `uv run clip-index-worker` for Redis/RQ indexing workers;
+- `src/index_enqueue.py` / `uv run clip-index-enqueue` for enqueueing indexing
+  jobs.
+
+Avoid changing `Source-huggingface/` unless the task explicitly targets the
+legacy Space version.
+
 ## Scope And Boundaries
 
 Included:

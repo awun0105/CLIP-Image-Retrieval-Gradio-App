@@ -34,8 +34,9 @@ docs/
 1. [Local development](EN/local-development.md)
 2. [Configuration](EN/configuration.md)
 3. [API reference](EN/api.md)
-4. [Architecture](EN/architecture.md)
-5. [Data flows](EN/data-flow.md)
+4. [Maintenance scripts](EN/scripts.md)
+5. [Architecture](EN/architecture.md)
+6. [Data flows](EN/data-flow.md)
 
 ### Operator / Deployment
 
@@ -63,6 +64,7 @@ docs/
 | How does text search work? | [EN/data-flow.md](EN/data-flow.md), [EN/api.md](EN/api.md) |
 | How does image search work? | [EN/data-flow.md](EN/data-flow.md), [EN/api.md](EN/api.md) |
 | How does incremental indexing work? | [EN/architecture.md](EN/architecture.md), [EN/data-flow.md](EN/data-flow.md) |
+| What are the scripts in `scripts/` for? | [EN/scripts.md](EN/scripts.md) |
 | Which `.env` file should I use? | [EN/configuration.md](EN/configuration.md) |
 | Where do API keys and MinIO keys come from? | [EN/configuration.md](EN/configuration.md) |
 | How do I run locally? | [EN/local-development.md](EN/local-development.md) |

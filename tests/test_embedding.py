@@ -13,7 +13,7 @@ import torch
 from transformers.modeling_outputs import BaseModelOutputWithPooling
 
 from config import Settings
-from core.embedding import EmbeddingService, _as_tensor
+from core.embedding import EmbeddingService, _as_tensor, _tokenizer_max_length
 
 
 def test_embedding_service_not_loaded_at_init():
@@ -87,6 +87,12 @@ def test_as_tensor_rejects_unknown_type():
         _as_tensor(object())
 
 
+def test_tokenizer_max_length_falls_back_for_invalid_sentinel():
+    tokenizer = MagicMock()
+    tokenizer.model_max_length = 10**30
+    assert _tokenizer_max_length(tokenizer) == 77
+
+
 def _make_loaded_service(features_obj) -> EmbeddingService:
     """Return an EmbeddingService whose CLIP model is a mock returning ``features_obj``."""
     service = EmbeddingService(Settings(device="cpu"))
@@ -114,6 +120,21 @@ def test_get_text_features_handles_base_model_output_with_pooling():
     assert isinstance(result, np.ndarray)
     assert result.shape == (1, 512)
     np.testing.assert_array_equal(result, pooled.numpy())
+
+
+def test_get_text_features_truncates_to_clip_token_limit():
+    tensor = torch.zeros(1, 512)
+    service = _make_loaded_service(tensor)
+    service._tokenizer.model_max_length = 77
+
+    service.get_text_features(" ".join(["red"] * 200))
+
+    service._tokenizer.assert_called_once_with(
+        " ".join(["red"] * 200),
+        return_tensors="pt",
+        truncation=True,
+        max_length=77,
+    )
 
 
 def test_get_image_features_handles_base_model_output_with_pooling():
