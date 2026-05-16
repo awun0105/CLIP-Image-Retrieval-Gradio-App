@@ -49,7 +49,7 @@ changed. The system avoids repeated CLIP work by using:
 
 - file metadata checks (`file_size`, `modified_at`);
 - SHA256 content hashes;
-- Qdrant payload lookup;
+- Qdrant payload lookup limited to the fields needed for indexing state;
 - MinIO object existence checks.
 
 If the vector already exists and the image object still exists in MinIO, the

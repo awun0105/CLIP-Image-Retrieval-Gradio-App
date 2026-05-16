@@ -162,6 +162,11 @@ abuse. They are configurable so high-quality images can still be allowed.
 | `QDRANT_UPSERT_BATCH_SIZE` | `100` | Number of Qdrant points sent per upsert request. This is separate from `INGEST_BATCH_SIZE`, which controls CLIP image encoding batches. |
 | `SEARCH_MODE_DEFAULT` | `ann` | Default search mode: `ann`, `exact`, or `ann_indexed_only`. |
 
+Use `QDRANT_UPSERT_BATCH_SIZE` to tune write pressure on Qdrant. Larger values
+reduce the number of upsert calls but increase request size and memory held
+while building point payloads. Keep it independent from `INGEST_BATCH_SIZE`,
+which tunes CLIP inference throughput and image memory pressure.
+
 Search modes:
 
 - `ann`: approximate nearest neighbor search using Qdrant index when available.
@@ -210,7 +215,8 @@ process restarts better than in-memory state.
 
 Batching improves CLIP throughput and limits memory pressure. Upload workers
 improve network I/O throughput but should not be set so high that MinIO or the
-host becomes overloaded.
+host becomes overloaded. Qdrant write chunking is configured in the Qdrant
+section through `QDRANT_UPSERT_BATCH_SIZE`.
 
 ### Observability
 

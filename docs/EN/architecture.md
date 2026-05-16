@@ -146,6 +146,11 @@ dedicated model server such as Triton, TorchServe, or Ray Serve.
 3. Query Qdrant with the selected search mode.
 4. Return normalized `SearchResult` objects.
 
+The API layer turns those results into response objects and signs MinIO object
+keys directly in-process. Presigned URL creation is local signing work, so the
+current response assembly does not create a per-request thread pool for that
+step.
+
 Supported search modes:
 
 - `ann`: approximate search, normal production mode;
@@ -173,7 +178,10 @@ Implementation concepts:
 - It checks MinIO object existence so Qdrant and MinIO stay consistent.
 - It batch-encodes changed images.
 - It uploads files to MinIO with bounded worker concurrency.
-- It upserts vectors and metadata to Qdrant per ingest batch.
+- It upserts vectors and metadata to Qdrant after each ingest batch. Qdrant
+  writes are then chunked by `QDRANT_UPSERT_BATCH_SIZE`, which is separate from
+  `INGEST_BATCH_SIZE`: the first controls Qdrant request size, the second
+  controls CLIP image encoding batch size.
 
 Counters returned by indexing:
 
@@ -209,6 +217,11 @@ The collection uses:
 - distance: cosine;
 - HNSW indexing;
 - deterministic point ids derived from `uuid5(NAMESPACE_URL, object_key)`.
+
+Qdrant write batching is configurable with `QDRANT_UPSERT_BATCH_SIZE`. Keep this
+separate from `INGEST_BATCH_SIZE`: increasing CLIP batch size affects memory and
+model throughput, while increasing Qdrant upsert batch size affects network
+request size and Qdrant write pressure.
 
 Why UUID5? The same object key always maps to the same Qdrant point id. Reindexing
 the same file updates the existing point instead of creating duplicates.

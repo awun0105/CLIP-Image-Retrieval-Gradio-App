@@ -54,6 +54,8 @@ billing, inventory management, or multi-tenant authorization.
   visually similar catalog items.
 - **Incremental indexing**: scan local image folders and only encode/upload
   new or changed files by checking file metadata and SHA256 content hashes.
+  Indexing retrieves only the Qdrant payload fields needed for state checks and
+  writes vectors in configurable Qdrant upsert batches.
 - **Background ingestion**: submit indexing jobs through the API or CLI; in the
   production stack Redis/RQ runs the long work outside the API request path.
 - **Runtime operations**: API key auth, upload guardrails, Prometheus
