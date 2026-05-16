@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import io
 import logging
-from concurrent.futures import ThreadPoolExecutor
 from time import perf_counter
 from typing import Annotated
 
@@ -62,8 +61,7 @@ def _to_response(
     if not results:
         return SearchResponse(results=[], total=0, query=query)
 
-    with ThreadPoolExecutor(max_workers=min(8, len(results))) as executor:
-        items = list(executor.map(_item_for_result, results))
+    items = [_item_for_result(result) for result in results]
     return SearchResponse(results=items, total=len(items), query=query)
 
 
