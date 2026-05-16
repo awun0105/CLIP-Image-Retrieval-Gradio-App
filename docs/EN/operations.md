@@ -97,6 +97,12 @@ Counters:
 - `uploaded_only_count`: MinIO repaired without re-embedding;
 - `failed_count`: per-file failures.
 
+Memory note: indexing currently loads `CAPTIONS_PATH` as a single JSON object
+when that file exists. If the worker uses unexpectedly high memory before CLIP
+encoding starts, inspect the captions file size first. For very large catalogs,
+the recommended next hardening task is to replace full JSON loading with lazy
+caption lookup through SQLite, indexed JSONL, or a key-value store.
+
 ## Common Incidents
 
 ### API Returns 401

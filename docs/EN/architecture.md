@@ -176,6 +176,8 @@ Implementation concepts:
   reads when possible.
 - It computes SHA256 only when metadata is insufficient.
 - It checks MinIO object existence so Qdrant and MinIO stay consistent.
+- It optionally loads captions from `CAPTIONS_PATH` and attaches captions to
+  Qdrant payloads.
 - It batch-encodes changed images.
 - It uploads files to MinIO with bounded worker concurrency.
 - It upserts vectors and metadata to Qdrant after each ingest batch. Qdrant
@@ -316,6 +318,11 @@ single VPS.
 - The production Docker image uses CPU PyTorch wheels for reliable, smaller
   builds. GPU production requires a separate GPU image/profile.
 - API key auth is simple shared-secret auth, not full user/role management.
+- Captions are currently loaded from `CAPTIONS_PATH` as one JSON object during
+  indexing/migration. This is acceptable for the included DeepFashion-sized
+  metadata, but very large caption maps can create high worker memory pressure.
+  The next hardening step is a lazy caption lookup backend, such as SQLite,
+  JSONL plus an index, or another key-value store keyed by filename.
 - Redis/RQ provides a simple durable job backend, but high-scale
   deployments may need stronger job orchestration and distributed locks.
 - Gradio UI is mounted in the same app process for simplicity. A larger product

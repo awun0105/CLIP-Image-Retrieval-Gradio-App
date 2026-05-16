@@ -237,3 +237,10 @@ section through `QDRANT_UPSERT_BATCH_SIZE`.
 In production compose, paths refer to paths inside the container, for example
 `/data/images`. You must mount or copy data so the container can actually see
 that path.
+
+`CAPTIONS_PATH` currently points to a JSON object loaded into worker memory
+during indexing/migration. This is simple and fast for moderate metadata files.
+For very large catalogs, treat caption lookup as the next ingestion hardening
+task: move captions to SQLite, JSONL with an index, or a key-value store so the
+worker can look up captions lazily by filename instead of parsing the entire map
+before each run.
