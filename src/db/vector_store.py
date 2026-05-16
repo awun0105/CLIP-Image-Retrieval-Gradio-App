@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import uuid
+from collections.abc import Sequence
 
 import numpy as np
 from qdrant_client import QdrantClient
@@ -70,8 +71,17 @@ class VectorStore:
         """Return a point payload by object key, or ``None`` when missing."""
         return self.get_payloads([object_key]).get(object_key)
 
-    def get_payloads(self, object_keys: list[str]) -> dict[str, dict]:
-        """Return payloads for multiple object keys in one Qdrant request."""
+    def get_payloads(
+        self,
+        object_keys: list[str],
+        payload_fields: Sequence[str] | None = None,
+    ) -> dict[str, dict]:
+        """Return payloads for multiple object keys in one Qdrant request.
+
+        ``payload_fields`` can limit the returned payload keys when callers only
+        need indexing state, reducing network and memory overhead for large
+        payloads.
+        """
         if not object_keys:
             return {}
         ids_by_key = {key: self.point_id_for_key(key) for key in object_keys}
@@ -79,7 +89,7 @@ class VectorStore:
         records = self.client.retrieve(
             collection_name=self.collection_name,
             ids=list(ids_by_key.values()),
-            with_payload=True,
+            with_payload=list(payload_fields) if payload_fields is not None else True,
             with_vectors=False,
         )
         payloads: dict[str, dict] = {}

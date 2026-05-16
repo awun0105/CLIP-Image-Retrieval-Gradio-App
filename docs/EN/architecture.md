@@ -164,7 +164,9 @@ Implementation concepts:
 
 - It iterates image files instead of loading the entire file list into a large
   memory structure.
-- It checks Qdrant payloads in state lookup batches.
+- It checks only the Qdrant payload fields needed for indexing state
+  (`file_size`, `modified_at`, `content_hash`, and `image_path`) in state
+  lookup batches, avoiding unnecessary payload transfer during large scans.
 - It uses fast metadata (`file_size`, `modified_at`) to skip expensive SHA256
   reads when possible.
 - It computes SHA256 only when metadata is insufficient.

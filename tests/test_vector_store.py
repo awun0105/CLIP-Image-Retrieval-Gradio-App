@@ -81,6 +81,24 @@ def test_upsert_uses_configured_batch_size(settings, vector_store):
     assert vector_store.get_collection_info()["points_count"] == 5
 
 
+def test_get_payloads_can_limit_payload_fields(vector_store):
+    rng = np.random.default_rng(12)
+    key = "images/limited.jpg"
+    metadata = {
+        key: {
+            "file_size": 123,
+            "modified_at": 456.0,
+            "content_hash": "abc",
+            "source_path": "/tmp/limited.jpg",
+        }
+    }
+    vector_store.upsert_batch([key], rng.random((1, 512)).astype(np.float32), metadata_by_key=metadata)
+
+    payload = vector_store.get_payloads([key], payload_fields=("file_size", "modified_at"))[key]
+
+    assert payload == {"file_size": 123, "modified_at": 456.0}
+
+
 def test_delete_collection(vector_store):
     rng = np.random.default_rng(9)
     vector_store.upsert_batch(["images/x.jpg"], rng.random((1, 512)).astype(np.float32))
