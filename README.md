@@ -111,8 +111,7 @@ For full details, start with the documentation map:
 ├── docs/
 │   ├── README.md         # Documentation map
 │   ├── EN/               # English documentation
-│   ├── VN/               # Vietnamese docs placeholder for a later pass
-│   └── plans/            # Planning notes, not user-facing docs
+│   └── VN/               # Vietnamese docs placeholder for a later pass
 ├── Source-huggingface/   # Legacy Hugging Face Spaces implementation
 ├── ops/prometheus/       # Prometheus scrape config
 ├── docker-compose.yml    # Local/simple compose stack
@@ -144,6 +143,10 @@ Open:
 Local development usually uses `.env`, `localhost` service endpoints, and API
 key auth disabled for convenience.
 
+Before search returns useful results, index an image folder through the UI or
+the indexing API. The default local data paths point at `DeepFashion/` if that
+dataset exists on your machine.
+
 Detailed guide: [docs/EN/local-development.md](docs/EN/local-development.md)
 
 ## Production Stack Quickstart
@@ -169,6 +172,10 @@ Production compose starts:
 - `qdrant`: vector database
 - `minio`: object storage
 - `prometheus`: metrics scraper
+
+`API_KEY`, `MINIO_ROOT_USER`, `MINIO_ROOT_PASSWORD`, `MINIO_ACCESS_KEY`, and
+`MINIO_SECRET_KEY` are operator-created secrets. The example file only provides
+placeholder values; replace them before running a real deployment.
 
 Detailed guide: [docs/EN/deployment/production.md](docs/EN/deployment/production.md)
 
@@ -250,6 +257,19 @@ Start here:
 The English documentation under `docs/EN/` is the current authoritative
 documentation set. The Vietnamese documentation folder is reserved for a later
 translation pass.
+
+Key docs:
+
+- [Overview](docs/EN/overview.md): project scope and service boundaries.
+- [Architecture](docs/EN/architecture.md): components and implementation ideas.
+- [Data flows](docs/EN/data-flow.md): search, indexing, metrics, and storage flows.
+- [Configuration](docs/EN/configuration.md): `.env`, `.env.production`, and all settings.
+- [Operations](docs/EN/operations.md): health, metrics, logs, jobs, and incidents.
+- [Scheduled ingestion](docs/EN/deployment/scheduled-ingestion.md): CLI, cron, and systemd ingestion.
+- [Backup and restore](docs/EN/deployment/backup-restore.md): state groups and recovery checks.
+
+`Source-huggingface/` is the legacy Hugging Face Spaces implementation. Treat
+the current FastAPI/Qdrant/MinIO service under `src/` as the main codebase.
 
 ## License
 
