@@ -6,7 +6,7 @@ import json
 import logging
 from dataclasses import asdict, replace
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from uuid import uuid4
 
 from redis import Redis
@@ -60,7 +60,7 @@ class IndexingJobBackend:
 
     def _start_redis_job(self, images_dir: Path | None = None) -> IndexingJob:
         images_dir = self.indexing_service._resolve_images_dir(images_dir)
-        active_job_id = self.redis.get(_ACTIVE_JOB_KEY)
+        active_job_id = cast(str | bytes | None, self.redis.get(_ACTIVE_JOB_KEY))
         if active_job_id:
             active_job = self._get_redis_job(_redis_text(active_job_id))
             if active_job is not None and active_job.status in {"queued", "running"}:
@@ -88,7 +88,7 @@ class IndexingJobBackend:
         return _snapshot_job(job)
 
     def _get_redis_job(self, job_id: str) -> IndexingJob | None:
-        data = self.redis.get(_job_key(job_id))
+        data = cast(str | bytes | bytearray | None, self.redis.get(_job_key(job_id)))
         if data is None:
             return None
         return _job_from_dict(json.loads(data))
@@ -175,7 +175,7 @@ def _update_job(
     started_at: str | None = None,
     finished_at: str | None = None,
 ) -> None:
-    data = redis.get(_job_key(job_id))
+    data = cast(str | bytes | bytearray | None, redis.get(_job_key(job_id)))
     if data is None:
         raise KeyError(f"Indexing job not found: {job_id}")
     job = _job_from_dict(json.loads(data))
