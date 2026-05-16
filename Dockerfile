@@ -10,9 +10,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-# System deps required to build wheels for the CLIP / Qdrant / Pillow stack.
+# Runtime deps for healthchecks and TLS package downloads.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends build-essential curl ca-certificates \
+    && apt-get install -y --no-install-recommends curl ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 # Install uv (Astral) — much faster Python package manager than pip.

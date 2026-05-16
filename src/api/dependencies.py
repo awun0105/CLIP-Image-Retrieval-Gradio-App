@@ -8,6 +8,7 @@ from config import Settings
 from core.embedding import EmbeddingService
 from core.image_service import ImageService
 from core.indexing import IndexingService
+from core.indexing_jobs import IndexingJobBackend
 from core.search import SearchService
 from db.object_store import ObjectStore
 from db.vector_store import VectorStore
@@ -46,6 +47,11 @@ def get_indexing_service() -> IndexingService:
         get_object_store(),
         get_settings(),
     )
+
+
+@lru_cache(maxsize=1)
+def get_indexing_job_backend() -> IndexingJobBackend:
+    return IndexingJobBackend(get_indexing_service(), get_settings())
 
 
 @lru_cache(maxsize=1)

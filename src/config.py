@@ -38,6 +38,12 @@ class Settings(BaseSettings):
     minio_upload_workers: int = 8
     index_fast_metadata_skip: bool = True
     index_repair_missing_objects: bool = True
+    indexing_job_backend: str = "memory"  # "memory" | "redis"
+    redis_url: str = "redis://localhost:6379/0"
+    indexing_queue_name: str = "indexing"
+    indexing_job_timeout_seconds: int = 3600
+    indexing_job_result_ttl_seconds: int = 86400
+    indexing_job_failure_ttl_seconds: int = 604800
 
     # MinIO
     minio_endpoint: str = "localhost:9000"
@@ -55,3 +61,10 @@ class Settings(BaseSettings):
     api_host: str = "0.0.0.0"
     api_port: int = 8000
     log_level: str = "INFO"
+    log_format: str = "text"  # "text" | "json"
+    enable_metrics: bool = True
+    enable_api_key_auth: bool = False
+    api_key: str | None = None
+    max_upload_bytes: int = 100 * 1024 * 1024
+    max_image_pixels: int = 50_000_000
+    allowed_image_content_types: str = "image/jpeg,image/png,image/webp"

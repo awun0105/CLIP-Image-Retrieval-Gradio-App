@@ -26,6 +26,9 @@ dependencies = [
     "pillow>=10.0",
     "tqdm>=4.60",
     "python-multipart>=0.0.9",
+    "prometheus-client>=0.20",
+    "redis>=5.0",
+    "rq>=2.0",
 ]
 
 [project.optional-dependencies]
@@ -42,10 +45,12 @@ legacy = [
 
 [project.scripts]
 clip-retrieval = "server:main"
+clip-index-worker = "worker:main"
+clip-index-enqueue = "index_enqueue:main"
 
 [tool.setuptools]
 package-dir = { "" = "src" }
-py-modules = ["server", "config"]
+py-modules = ["server", "config", "worker", "index_enqueue"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
@@ -59,6 +64,16 @@ dev-dependencies = [
     "ruff>=0.5",
     "mypy>=1.10",
 ]
+
+[tool.uv.sources]
+torch = [
+    { index = "pytorch-cpu", marker = "sys_platform == 'linux'" },
+]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
 
 [tool.ruff]
 line-length = 100
