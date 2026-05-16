@@ -6,7 +6,7 @@ import json
 import logging
 from dataclasses import asdict, replace
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 from uuid import uuid4
 
 from redis import Redis
@@ -49,7 +49,7 @@ class IndexingJobBackend:
     @property
     def redis(self) -> Redis:
         if self._redis is None:
-            self._redis = Redis.from_url(self.settings.redis_url, decode_responses=True)
+            self._redis = Redis.from_url(self.settings.redis_url)
         return self._redis
 
     @property
@@ -62,7 +62,7 @@ class IndexingJobBackend:
         images_dir = self.indexing_service._resolve_images_dir(images_dir)
         active_job_id = self.redis.get(_ACTIVE_JOB_KEY)
         if active_job_id:
-            active_job = self._get_redis_job(str(active_job_id))
+            active_job = self._get_redis_job(_redis_text(active_job_id))
             if active_job is not None and active_job.status in {"queued", "running"}:
                 raise IndexingJobAlreadyRunning("An indexing job is already queued or running")
             self.redis.delete(_ACTIVE_JOB_KEY)
@@ -91,7 +91,7 @@ class IndexingJobBackend:
         data = self.redis.get(_job_key(job_id))
         if data is None:
             return None
-        return _job_from_dict(json.loads(cast(str, data)))
+        return _job_from_dict(json.loads(data))
 
 
 def run_indexing_job(job_id: str, images_dir: str) -> None:
@@ -99,7 +99,7 @@ def run_indexing_job(job_id: str, images_dir: str) -> None:
     from api.dependencies import get_indexing_service, get_settings
 
     settings = get_settings()
-    redis = Redis.from_url(settings.redis_url, decode_responses=True)
+    redis = Redis.from_url(settings.redis_url)
     indexing_service = get_indexing_service()
 
     _update_job(redis, job_id, status="running", started_at=IndexingService._now())
@@ -154,6 +154,12 @@ def _job_from_dict(data: dict[str, Any]) -> IndexingJob:
     )
 
 
+def _redis_text(value: str | bytes) -> str:
+    if isinstance(value, bytes):
+        return value.decode("utf-8")
+    return value
+
+
 def _write_job(redis: Redis, job: IndexingJob) -> None:
     payload = asdict(job)
     redis.set(_job_key(job.job_id), json.dumps(payload))
@@ -172,7 +178,7 @@ def _update_job(
     data = redis.get(_job_key(job_id))
     if data is None:
         raise KeyError(f"Indexing job not found: {job_id}")
-    job = _job_from_dict(json.loads(cast(str, data)))
+    job = _job_from_dict(json.loads(data))
     if status is not None:
         job.status = status
     if stats is not None:

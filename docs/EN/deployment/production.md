@@ -70,6 +70,7 @@ Inside production compose, use Docker service names:
 ```env
 QDRANT_URL=http://qdrant:6333
 MINIO_ENDPOINT=minio:9000
+MINIO_PUBLIC_ENDPOINT=http://localhost:9000
 REDIS_URL=redis://redis:6379/0
 INDEXING_JOB_BACKEND=redis
 ```
@@ -77,6 +78,22 @@ INDEXING_JOB_BACKEND=redis
 Do not use `localhost` for these values inside production compose. Inside the
 `app` container, `localhost` means the `app` container itself, not Qdrant,
 MinIO, or Redis.
+
+`MINIO_PUBLIC_ENDPOINT` is different: it is the endpoint returned inside
+presigned image URLs for browsers/API clients. In a local production simulation
+use `http://localhost:9000`. On a VPS, use the public MinIO URL or reverse proxy
+URL that users can reach.
+
+Production compose publishes MinIO with:
+
+```env
+MINIO_API_PORT=9000
+MINIO_CONSOLE_PORT=9001
+```
+
+The API port must be reachable wherever users open presigned image URLs. The
+console port is useful locally, but on a real VPS it should be protected or
+kept behind a private network/reverse proxy.
 
 ### Data Paths
 
@@ -204,6 +221,8 @@ For a real VPS:
   and worker-triggered indexing to see the same files.
 - Use a reverse proxy such as Caddy, Nginx, or Traefik for HTTPS.
 - Do not expose MinIO Console publicly without protection.
+- If search results return direct MinIO presigned URLs, expose/proxy the MinIO
+  API endpoint configured in `MINIO_PUBLIC_ENDPOINT`.
 - Back up Qdrant and MinIO volumes.
 - Consider firewall rules so only required ports are public.
 

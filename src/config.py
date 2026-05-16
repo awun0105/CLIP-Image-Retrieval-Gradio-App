@@ -52,6 +52,8 @@ class Settings(BaseSettings):
     minio_secret_key: str = "minioadmin"
     minio_bucket: str = "fashion-images"
     minio_secure: bool = False
+    minio_public_endpoint: str | None = None
+    minio_region: str = "us-east-1"
 
     # Legacy (migrate)
     legacy_images_path: Path | None = Path("./DeepFashion/images")

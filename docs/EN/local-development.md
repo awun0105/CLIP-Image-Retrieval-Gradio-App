@@ -191,6 +191,7 @@ mode it should usually be:
 
 ```env
 MINIO_ENDPOINT=localhost:9000
+MINIO_PUBLIC_ENDPOINT=http://localhost:9000
 ```
 
 If you accidentally use `minio:9000` while running the Python app on the host,

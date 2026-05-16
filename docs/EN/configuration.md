@@ -207,11 +207,22 @@ Search modes:
 | `MINIO_SECRET_KEY` | `minioadmin` | Credential used by app/worker. |
 | `MINIO_BUCKET` | `fashion-images` | Bucket containing indexed images. |
 | `MINIO_SECURE` | `false` | Use HTTPS when true. |
+| `MINIO_PUBLIC_ENDPOINT` | unset | Optional browser/client-facing MinIO endpoint used when rewriting presigned URLs. |
+| `MINIO_REGION` | `us-east-1` | S3 signing region for MinIO presigned URLs. |
+| `MINIO_API_PORT` | production example only | Host port published by production compose for MinIO API/presigned URLs. |
+| `MINIO_CONSOLE_PORT` | production example only | Host port published by production compose for MinIO Console. |
 | `MINIO_ROOT_USER` | production example only | Root user for MinIO container. |
 | `MINIO_ROOT_PASSWORD` | production example only | Root password for MinIO container. |
 
 MinIO stores image files. Qdrant stores vectors and metadata. Search results use
 Qdrant payloads to find MinIO object keys and then return presigned URLs.
+
+`MINIO_ENDPOINT` is the internal endpoint used by the app/worker SDK. In
+production compose this is usually `minio:9000`. Browser clients normally
+cannot resolve that Docker-only hostname, so set `MINIO_PUBLIC_ENDPOINT` to the
+public endpoint users can open, for example `http://localhost:9000` during a
+local production simulation or `https://minio.example.com` on a VPS behind a
+reverse proxy.
 
 ### Redis/RQ Indexing Jobs
 

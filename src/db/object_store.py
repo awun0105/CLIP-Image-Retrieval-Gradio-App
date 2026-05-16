@@ -5,6 +5,7 @@ from __future__ import annotations
 import io
 import logging
 from datetime import timedelta
+from urllib.parse import urlsplit
 
 from minio import Minio
 from minio.error import S3Error
@@ -25,7 +26,21 @@ class ObjectStore:
             access_key=settings.minio_access_key,
             secret_key=settings.minio_secret_key,
             secure=settings.minio_secure,
+            region=settings.minio_region,
         )
+        self.presign_client = self.client
+        if settings.minio_public_endpoint:
+            public_endpoint, public_secure = _parse_minio_endpoint(
+                settings.minio_public_endpoint,
+                default_secure=settings.minio_secure,
+            )
+            self.presign_client = Minio(
+                endpoint=public_endpoint,
+                access_key=settings.minio_access_key,
+                secret_key=settings.minio_secret_key,
+                secure=public_secure,
+                region=settings.minio_region,
+            )
         self._ensure_bucket()
 
     def _ensure_bucket(self) -> None:
@@ -46,7 +61,7 @@ class ObjectStore:
         )
 
     def get_presigned_url(self, object_key: str, expires: int = 3600) -> str:
-        return self.client.presigned_get_object(
+        return self.presign_client.presigned_get_object(
             self.bucket, object_key, expires=timedelta(seconds=expires)
         )
 
@@ -67,3 +82,13 @@ class ObjectStore:
 
     def list_objects(self, prefix: str = "") -> list[str]:
         return [obj.object_name for obj in self.client.list_objects(self.bucket, prefix=prefix)]
+
+
+def _parse_minio_endpoint(public_endpoint: str, *, default_secure: bool) -> tuple[str, bool]:
+    """Return a MinIO SDK endpoint and secure flag from a public endpoint setting."""
+    public = public_endpoint.strip().rstrip("/")
+    if "://" not in public:
+        return public, default_secure
+
+    parsed = urlsplit(public)
+    return parsed.netloc, parsed.scheme == "https"
