@@ -74,13 +74,18 @@ Key idea: containers communicate by Docker service name:
 
 Text search is the main read path. The request enters FastAPI, optionally passes
 API key validation, then goes through `SearchService`. The service embeds the
-query with CLIP, searches Qdrant, and converts result object keys into MinIO
-presigned URLs. The client receives ranked images, scores, captions, filenames,
-and URLs that can be opened by the browser.
+query with CLIP, searches Qdrant, records search latency, and returns normalized
+results to the route. The route converts result object keys into MinIO presigned
+URLs. The client receives ranked images, scores, captions, filenames, and URLs
+that can be opened by the browser.
 
 Request middleware runs before and after the route handler. It accepts an
 incoming `X-Request-ID` or generates one, records HTTP metrics, and returns that
 request id in the response headers.
+
+Search latency is intentionally recorded in `SearchService`, not only in the
+FastAPI route. The Gradio UI also calls `SearchService` directly, so this keeps
+UI searches and REST API searches in the same Prometheus histogram.
 
 ```mermaid
 sequenceDiagram
@@ -104,6 +109,7 @@ sequenceDiagram
     E-->>S: text vector
     S->>V: search(vector, top_k, mode, hnsw_ef)
     V-->>S: ranked SearchResult rows
+    S->>S: observe clip_search_duration_seconds
     S-->>API: results
     loop each result
         API->>I: get_image_url(image_path)
@@ -128,8 +134,8 @@ queries explicitly before model inference.
 Image search follows the same retrieval idea as text search, but the input is a
 multipart image upload. The route first applies upload guardrails so the service
 does not process unsupported or unexpectedly large files. Pillow decodes the
-image into RGB, CLIP embeds it, Qdrant retrieves similar vectors, and the API
-returns MinIO presigned URLs for the ranked results.
+image into RGB, then `SearchService` embeds it, searches Qdrant, and records
+search latency. The API route signs MinIO presigned URLs for the ranked results.
 
 ```mermaid
 sequenceDiagram
@@ -154,6 +160,7 @@ sequenceDiagram
     E-->>S: image vector
     S->>V: vector search
     V-->>S: ranked results
+    S->>S: observe clip_search_duration_seconds
     S-->>API: results
     API->>I: sign presigned URLs locally
     I-->>API: URLs
@@ -357,7 +364,8 @@ the route returns `404`.
 Metrics include:
 
 - HTTP request count and latency;
-- search latency;
+- search latency from `SearchService`, covering both REST API calls and Gradio
+  UI searches;
 - embedding latency;
 - indexing job terminal counts.
 
@@ -367,6 +375,8 @@ Each indexed image has two persisted representations. MinIO stores the binary
 image object. Qdrant stores the vector and metadata payload. The payload's
 `image_path` points back to the MinIO object key. Search only returns Qdrant
 hits; `ImageService` turns those keys into temporary presigned URLs for clients.
+The URL is signed against `MINIO_PUBLIC_ENDPOINT` when configured, otherwise the
+internal `MINIO_ENDPOINT` is used.
 
 ```mermaid
 flowchart LR
@@ -375,7 +385,7 @@ flowchart LR
     CLIP --> Qdrant["Qdrant point<br/>id=uuid5(object_key)"]
     Qdrant --> Payload["Payload metadata<br/>image_path, filename, caption,<br/>content_hash, file_size,<br/>modified_at, source_path"]
     Payload --> MinIO
-    MinIO --> URL["Presigned URL"]
+    MinIO --> URL["Presigned URL<br/>public endpoint if configured"]
     URL --> Client["Client browser/API"]
 ```
 

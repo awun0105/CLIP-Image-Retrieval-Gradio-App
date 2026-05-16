@@ -292,6 +292,23 @@ Use `MINIO_ROOT_USER` and `MINIO_ROOT_PASSWORD` for the console. Use
 
 For a simple single-host setup, they can be the same pair.
 
+### Search Results Return Unreachable MinIO URLs
+
+If search succeeds but `image_url` points to `http://minio:9000/...` or another
+host that your browser cannot open, `MINIO_PUBLIC_ENDPOINT` is missing or
+incorrect.
+
+Use two separate concepts:
+
+```env
+MINIO_ENDPOINT=minio:9000
+MINIO_PUBLIC_ENDPOINT=http://localhost:9000
+```
+
+`MINIO_ENDPOINT` is for app/worker container-to-container access.
+`MINIO_PUBLIC_ENDPOINT` is only for presigned URLs returned to users. On a VPS,
+set it to the public HTTPS MinIO/reverse-proxy endpoint.
+
 ## Release Checklist
 
 Before merging or deploying:

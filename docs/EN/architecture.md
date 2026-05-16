@@ -177,12 +177,20 @@ dedicated model server such as Triton, TorchServe, or Ray Serve.
 1. Validate query or image input at the service boundary.
 2. Use CLIP to produce a 512-dimensional embedding.
 3. Query Qdrant with the selected search mode.
-4. Return normalized `SearchResult` objects.
+4. Record `clip_search_duration_seconds` with `kind` (`text` or `image`) and
+   `mode` labels.
+5. Return normalized `SearchResult` objects.
 
 The API layer turns those results into response objects and signs MinIO object
 keys directly in-process. Presigned URL creation is local signing work, so the
 current response assembly does not create a per-request thread pool for that
 step.
+
+Search latency is recorded in this service layer rather than in the REST route.
+That is deliberate: the Gradio UI calls `SearchService` directly, so service
+level instrumentation keeps API and UI searches visible in the same Prometheus
+histogram. The metric covers embedding plus Qdrant retrieval, but not API
+serialization or presigned URL response assembly.
 
 Supported search modes:
 
@@ -309,6 +317,18 @@ Why not store base64 images in Qdrant?
 - search responses can return presigned URLs instead of embedding large blobs
   inside JSON.
 
+`ObjectStore` may use two MinIO clients:
+
+- an internal client configured by `MINIO_ENDPOINT`, used by the app/worker to
+  create buckets, upload files, check object existence, and list objects;
+- a presign client configured by `MINIO_PUBLIC_ENDPOINT` when that value is set,
+  used only to generate browser/client-facing presigned URLs.
+
+This separation matters in Docker production mode. The app and worker can reach
+`minio:9000` on the Compose network, but a browser usually cannot. In that case
+`MINIO_PUBLIC_ENDPOINT` should point to the host or reverse-proxy URL that users
+can open.
+
 ### Redis/RQ Worker
 
 Redis stores queue and job metadata. RQ workers execute indexing jobs.
@@ -323,6 +343,12 @@ Why use Redis/RQ?
 
 Redis is operational state, not the source of truth for image retrieval. Qdrant
 and MinIO are the important persisted retrieval state.
+
+The Redis client is used with the default byte-response behavior so it remains
+compatible with RQ internals. Job metadata is stored as JSON and decoded at the
+application boundary. Operators do not need a Redis setting for this; API,
+worker, and enqueue CLI only need to agree on `REDIS_URL` and
+`INDEXING_QUEUE_NAME`.
 
 ### MigrationService
 
@@ -349,7 +375,8 @@ The app exposes:
 Important metrics:
 
 - HTTP request count and latency;
-- search latency by kind and mode;
+- search latency by kind and mode, recorded in `SearchService` so both REST API
+  and Gradio UI searches are included;
 - CLIP embedding latency by kind and priority;
 - indexing jobs by terminal status.
 

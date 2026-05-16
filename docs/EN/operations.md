@@ -40,7 +40,7 @@ Important metric groups:
 |---|---|
 | `clip_http_requests_total` | Count of HTTP requests by method, route, status. |
 | `clip_http_request_duration_seconds` | HTTP latency histogram. |
-| `clip_search_duration_seconds` | Search latency by text/image and search mode. |
+| `clip_search_duration_seconds` | Search latency by text/image and search mode. Recorded in `SearchService`, so both REST API and Gradio UI searches are included. |
 | `clip_embedding_duration_seconds` | CLIP inference latency by kind and foreground/background priority. |
 | `clip_indexing_jobs_total` | Completed/failed indexing job count. |
 
@@ -174,7 +174,11 @@ Actions:
 1. Open MinIO Console.
 2. Check bucket exists.
 3. Check object key from `image_path`.
-4. Re-run indexing; missing objects can be repaired if Qdrant metadata is valid.
+4. Check `MINIO_PUBLIC_ENDPOINT`. In production compose the internal endpoint is
+   usually `minio:9000`, but browsers need a reachable endpoint such as
+   `http://localhost:9000` for local simulation or a public reverse-proxy URL on
+   a VPS.
+5. Re-run indexing; missing objects can be repaired if Qdrant metadata is valid.
 
 ### First Request Is Slow
 

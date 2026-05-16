@@ -224,6 +224,12 @@ public endpoint users can open, for example `http://localhost:9000` during a
 local production simulation or `https://minio.example.com` on a VPS behind a
 reverse proxy.
 
+When `MINIO_PUBLIC_ENDPOINT` is set, the application still uses
+`MINIO_ENDPOINT` for internal storage operations, but it creates presigned URLs
+with a separate MinIO client pointed at the public endpoint. This avoids
+returning Docker-only URLs such as `http://minio:9000/...` to browsers or
+external API clients.
+
 ### Redis/RQ Indexing Jobs
 
 | Variable | Default | Meaning |
@@ -242,6 +248,12 @@ process restarts better than in-memory state.
 When `INDEXING_JOB_BACKEND=redis`, the API and worker must use the same
 `REDIS_URL` and `INDEXING_QUEUE_NAME`. If they differ, jobs can be accepted by
 the API but never picked up by the worker.
+
+The application uses Redis' default byte-response mode for compatibility with
+RQ. Job payloads are JSON strings decoded by the application code. There is no
+environment variable to change that behavior; avoid adding client-side
+`decode_responses=true` when extending Redis/RQ code because RQ expects byte
+payloads internally.
 
 ### Indexing Performance
 

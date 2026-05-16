@@ -88,6 +88,13 @@ curl http://localhost:8000/metrics
 
 If `ENABLE_METRICS=false`, this endpoint returns `404`.
 
+Search latency metrics are recorded inside `SearchService`, not only in REST
+routes. That means `clip_search_duration_seconds` includes searches triggered
+through `/api/v1/search/*` and searches triggered from the mounted Gradio UI.
+The histogram measures embedding plus Qdrant retrieval time by `kind`
+(`text`/`image`) and search `mode`; it does not include presigned URL response
+assembly.
+
 ## Text Search
 
 ```http

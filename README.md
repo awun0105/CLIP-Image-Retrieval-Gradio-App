@@ -59,8 +59,8 @@ billing, inventory management, or multi-tenant authorization.
 - **Background ingestion**: submit indexing jobs through the API or CLI; in the
   production stack Redis/RQ runs the long work outside the API request path.
 - **Runtime operations**: API key auth, upload guardrails, Prometheus
-  metrics, structured logs, Docker production compose, CI, backup/restore docs,
-  and evaluation/benchmark tools.
+  metrics for API and UI searches, structured logs, Docker production compose,
+  CI, backup/restore docs, and evaluation/benchmark tools.
 
 ## Architecture At A Glance
 
@@ -86,6 +86,8 @@ The service separates responsibilities:
 - CLIP converts text/images into vectors.
 - Qdrant performs cosine similarity search over vectors.
 - MinIO stores image objects and returns presigned URLs.
+- `MINIO_PUBLIC_ENDPOINT` keeps returned presigned URLs browser-reachable when
+  the app talks to MinIO through an internal Docker hostname.
 - Redis/RQ decouples long indexing jobs from HTTP requests.
 - Prometheus reads `/metrics` for operational visibility.
 

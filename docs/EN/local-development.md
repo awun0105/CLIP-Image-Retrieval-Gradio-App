@@ -58,6 +58,9 @@ Open:
 - MinIO Console: <http://localhost:9001>
 
 *Note: The Prometheus dashboard (port 9090) is only included in the [Production Stack](deployment/production.md).*
+The raw metrics endpoint still includes search latency from both REST API calls
+and searches performed through the mounted Gradio UI because search metrics are
+recorded in `SearchService`.
 
 Default MinIO credentials from `docker-compose.yml`:
 
