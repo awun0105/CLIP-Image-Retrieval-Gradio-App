@@ -1,6 +1,6 @@
 # English Documentation
 
-This is the current complete documentation set for the V3 codebase.
+This is the definitive and comprehensive documentation suite for the project.
 
 Read in this order if you are new to the project:
 
