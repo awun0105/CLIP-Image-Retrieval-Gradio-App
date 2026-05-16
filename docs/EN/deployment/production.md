@@ -92,6 +92,23 @@ These are paths inside the app/worker containers. If you use these paths, make
 sure the container can actually access the data, either by extending compose
 volumes or copying data into the image/container.
 
+Important: `docker-compose.prod.yml` does not mount your dataset into `/data` by
+default. If you want to index host data, add a bind mount or compose override for
+both `app` and `worker`, for example:
+
+```yaml
+services:
+  app:
+    volumes:
+      - /srv/deepfashion:/data:ro
+  worker:
+    volumes:
+      - /srv/deepfashion:/data:ro
+```
+
+With that example, `/srv/deepfashion/images` on the host is visible as
+`/data/images` inside the containers.
+
 ## 2. Validate Compose Config
 
 ```bash
@@ -121,6 +138,15 @@ Open:
 - Prometheus: <http://localhost:9090>
 
 ## 4. Verify
+
+The curl examples below use `$API_KEY`. Either export it manually or load it
+from `.env.production` first:
+
+```bash
+set -a
+source .env.production
+set +a
+```
 
 Health:
 
@@ -174,6 +200,8 @@ For a real VPS:
 
 - Put the repo under a stable path such as `/srv/clip-fashion-product-retrieval`.
 - Keep `.env.production` on the server but outside Git.
+- Mount the dataset path into both `app` and `worker` if you want API-triggered
+  and worker-triggered indexing to see the same files.
 - Use a reverse proxy such as Caddy, Nginx, or Traefik for HTTPS.
 - Do not expose MinIO Console publicly without protection.
 - Back up Qdrant and MinIO volumes.

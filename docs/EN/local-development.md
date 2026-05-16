@@ -39,6 +39,10 @@ Start sidecars:
 docker compose up -d qdrant minio
 ```
 
+This starts only the sidecars. Do not use `make docker-up` for this host-run
+workflow unless you intentionally want the app container too; otherwise the
+containerized app can compete with `make run` for port `8000`.
+
 Run the app:
 
 ```bash
@@ -75,6 +79,13 @@ MINIO_ENDPOINT=localhost:9000
 This is different from production compose, where all services run inside the
 same Docker network and use service names such as `qdrant:6333` and
 `minio:9000`.
+
+If you enable API key auth locally, add `-H "X-API-Key: $API_KEY"` to the curl
+examples below.
+
+If you set `QDRANT_MODE=memory`, the app uses an in-process Qdrant instance and
+does not need the Qdrant sidecar. MinIO is still required because search results
+return MinIO presigned URLs.
 
 ## Index A Folder
 
@@ -172,3 +183,15 @@ After the model is loaded, later requests are faster.
 Only one indexing job can run at a time. Poll the current job or wait for it to
 finish. This avoids conflicting writes and protects CLIP/MinIO/Qdrant from
 unbounded concurrent ingestion work.
+
+### Indexed Results Show Broken Image URLs
+
+Check that `MINIO_ENDPOINT` is reachable from your browser. In local host-run
+mode it should usually be:
+
+```env
+MINIO_ENDPOINT=localhost:9000
+```
+
+If you accidentally use `minio:9000` while running the Python app on the host,
+the browser will receive presigned URLs pointing to a Docker-only hostname.
