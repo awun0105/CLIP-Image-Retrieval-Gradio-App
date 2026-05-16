@@ -50,8 +50,10 @@ Open:
 - UI: <http://localhost:8000/ui>
 - API docs: <http://localhost:8000/docs>
 - Health: <http://localhost:8000/health>
-- Metrics: <http://localhost:8000/metrics>
+- Metrics: <http://localhost:8000/metrics> (Raw data)
 - MinIO Console: <http://localhost:9001>
+
+*Note: The Prometheus dashboard (port 9090) is only included in the [Production Stack](deployment/production.md).*
 
 Default MinIO credentials from `docker-compose.yml`:
 

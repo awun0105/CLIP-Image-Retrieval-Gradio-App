@@ -28,6 +28,8 @@ curl http://localhost:8000/metrics
 
 Prometheus scrapes the same endpoint in production compose.
 
+**Note on Availability:** The `/metrics` endpoint is always active if `ENABLE_METRICS=true`. However, the Prometheus dashboard (port `9090`) is only started as part of the [Production Stack](deployment/production.md). In local development, you can verify raw metrics data by visiting `http://localhost:8000/metrics`.
+
 Important metric groups:
 
 | Metric | Meaning |
