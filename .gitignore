@@ -40,6 +40,7 @@ hf_cache/
 
 Dataset/
 
-docs/plans/*
+# Local planning notes; keep out of public repository history.
+docs/plans/
 
 docs/QA.md
