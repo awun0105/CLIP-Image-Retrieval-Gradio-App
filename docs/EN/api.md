@@ -23,6 +23,14 @@ Protected route groups:
 
 `/health` and `/metrics` are not API-key protected in the current code.
 
+If `ENABLE_API_KEY_AUTH=true` but `API_KEY` is empty, protected endpoints
+return `500`. That is treated as a server configuration error, not as a client
+authentication failure.
+
+Every response includes an `X-Request-ID` header. If the client sends
+`X-Request-ID`, the API reuses it; otherwise the middleware generates one. Use
+this value to connect client requests with server logs.
+
 ## Health
 
 ```http
@@ -38,6 +46,32 @@ Example:
 curl http://localhost:8000/health
 ```
 
+Response:
+
+```json
+{
+  "status": "ok",
+  "model_loaded": false,
+  "qdrant": {
+    "name": "fashion_images",
+    "indexed_vectors_count": 10000,
+    "points_count": 10000,
+    "status": "green",
+    "vector_size": 512,
+    "distance": "Cosine",
+    "segments_count": 3,
+    "hnsw_config": {},
+    "optimizer_config": {},
+    "sample_has_vector": true
+  },
+  "minio_bucket": "fashion-images"
+}
+```
+
+`model_loaded=false` is not automatically an error. The CLIP model is lazy
+loaded on the first search or indexing request. If the Qdrant probe fails,
+`qdrant` contains an `error` field instead of collection details.
+
 ## Metrics
 
 ```http
@@ -51,6 +85,8 @@ Example:
 ```bash
 curl http://localhost:8000/metrics
 ```
+
+If `ENABLE_METRICS=false`, this endpoint returns `404`.
 
 ## Text Search
 
@@ -73,7 +109,7 @@ Fields:
 
 | Field | Required | Meaning |
 |---|---:|---|
-| `query` | Yes | Text query. Must not be empty. |
+| `query` | Yes | Text query. Must be 1 to 500 characters. |
 | `top_k` | No | Number of results, 1 to 100. Default 5. |
 | `search_mode` | No | `ann`, `exact`, or `ann_indexed_only`. Default `ann`. |
 | `hnsw_ef` | No | Qdrant query-time HNSW parameter, 32 to 512. |
@@ -111,6 +147,9 @@ Response:
 }
 ```
 
+If a result's MinIO URL cannot be signed, that result is still returned with
+`image_url=null` and the server logs a warning.
+
 ## Image Search
 
 ```http
@@ -123,11 +162,11 @@ Multipart form:
 
 Query params:
 
-| Param | Meaning |
-|---|---|
-| `top_k` | Number of results, 1 to 100. |
-| `search_mode` | `ann`, `exact`, or `ann_indexed_only`. |
-| `hnsw_ef` | Optional Qdrant HNSW query parameter, 32 to 512. |
+| Param | Required | Meaning |
+|---|---:|---|
+| `top_k` | No | Number of results, 1 to 100. Default 5. |
+| `search_mode` | No | `ann`, `exact`, or `ann_indexed_only`. Default `ann`. |
+| `hnsw_ef` | No | Optional Qdrant HNSW query parameter, 32 to 512. |
 
 Example:
 
@@ -144,6 +183,27 @@ Upload guardrails:
 - decoded image larger than `MAX_IMAGE_PIXELS` returns `413`;
 - invalid image bytes return `400`.
 
+The response shape is the same as text search, except `query` is `null` because
+the input was an image upload.
+
+Response:
+
+```json
+{
+  "results": [
+    {
+      "image_path": "images/example.jpg",
+      "image_url": "http://localhost:9000/...",
+      "score": 0.71,
+      "caption": "...",
+      "filename": "example.jpg"
+    }
+  ],
+  "total": 1,
+  "query": null
+}
+```
+
 ## Start Indexing
 
 ```http
@@ -159,6 +219,8 @@ Request body:
 ```
 
 `images_dir` is optional. If omitted, the service uses `LEGACY_IMAGES_PATH`.
+The directory path must exist from the API process perspective. In production
+compose, that means the path must exist inside the container.
 
 Example:
 
@@ -181,6 +243,9 @@ Response:
 ```
 
 The endpoint returns `202 Accepted` because indexing runs as a background job.
+If another indexing job is already `queued` or `running`, the endpoint returns
+`409`. If `images_dir` does not exist from the API process perspective, it
+returns `404`.
 
 ## Get Indexing Job
 
@@ -231,6 +296,27 @@ Response:
 While a job is `queued` or `running`, it is `null` because the collection state
 is still changing.
 
+Running response example:
+
+```json
+{
+  "job_id": "...",
+  "status": "running",
+  "images_dir": "/data/images",
+  "indexed_count": 32,
+  "updated_count": 0,
+  "skipped_count": 128,
+  "uploaded_only_count": 0,
+  "failed_count": 0,
+  "scanned_count": 200,
+  "collection_info": null,
+  "error": null,
+  "created_at": "...",
+  "started_at": "...",
+  "finished_at": null
+}
+```
+
 Important `collection_info` fields:
 
 | Field | Meaning |
@@ -253,16 +339,19 @@ Job statuses:
 - `completed`
 - `failed`
 
+Unknown `job_id` values return `404`.
+
 ## Common Status Codes
 
 | Code | Meaning |
 |---:|---|
 | `200` | Request completed. |
 | `202` | Indexing job accepted. |
-| `400` | Bad request, invalid query, invalid image, or invalid `top_k`. |
+| `400` | Runtime bad request, such as invalid image bytes or image-search `top_k` outside `[1, 100]`. |
 | `401` | Missing or invalid API key. |
 | `404` | Images directory or job id not found. |
 | `409` | Another indexing job is already queued/running. |
 | `413` | Upload exceeds configured byte or pixel limits. |
 | `415` | Unsupported upload content type. |
+| `422` | FastAPI/Pydantic validation error, for example empty query, invalid enum, or out-of-range `hnsw_ef`. |
 | `500` | Server misconfiguration or unexpected error. |
