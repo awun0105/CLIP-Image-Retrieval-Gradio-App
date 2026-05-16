@@ -3,6 +3,16 @@
 The service uses `pydantic-settings` in `src/config.py`. Values come from
 environment variables and, when present, a local `.env` file.
 
+Runtime precedence is:
+
+1. environment variables already present in the process or container;
+2. values from `.env` when the app is run directly from the repository;
+3. defaults declared in `src/config.py`.
+
+Unknown environment variables are ignored. Boolean values can be written as
+`true`/`false`. Empty optional values such as `DEVICE=` or `QDRANT_API_KEY=`
+mean "not configured".
+
 ## Which Env File Should I Use?
 
 | File | Used When | How To Use |
@@ -13,6 +23,11 @@ environment variables and, when present, a local `.env` file.
 | `.env.production` | Running `docker-compose.prod.yml` | Passed to Compose by `make prod-*` targets. Keep it local to the server. |
 
 Do not commit `.env` or `.env.production`.
+
+`docker-compose.yml` is the simple local Compose stack. Its app service uses
+inline development defaults and is mainly for quick demos. `docker-compose.prod.yml`
+uses `env_file` and should be used when you want to simulate or run the
+production stack.
 
 ## Local Development vs Production Stack
 
@@ -162,6 +177,15 @@ abuse. They are configurable so high-quality images can still be allowed.
 | `QDRANT_UPSERT_BATCH_SIZE` | `100` | Number of Qdrant points sent per upsert request. This is separate from `INGEST_BATCH_SIZE`, which controls CLIP image encoding batches. |
 | `SEARCH_MODE_DEFAULT` | `ann` | Default search mode: `ann`, `exact`, or `ann_indexed_only`. |
 
+Qdrant mode decides which connection settings matter:
+
+- `memory`: in-process Qdrant used mainly by tests and isolated local runs;
+  `QDRANT_URL` and `QDRANT_PATH` are ignored.
+- `local`: local embedded Qdrant storage at `QDRANT_PATH`; useful only when you
+  want file-backed local storage without a Qdrant server.
+- `remote`: connect to a Qdrant server through `QDRANT_URL` and optional
+  `QDRANT_API_KEY`; this is the normal Docker and production mode.
+
 Use `QDRANT_UPSERT_BATCH_SIZE` to tune write pressure on Qdrant. Larger values
 reduce the number of upsert calls but increase request size and memory held
 while building point payloads. Keep it independent from `INGEST_BATCH_SIZE`,
@@ -204,6 +228,10 @@ Use `memory` for local development if you do not want to run Redis. Use `redis`
 for production so indexing can run in the worker container and survive API
 process restarts better than in-memory state.
 
+When `INDEXING_JOB_BACKEND=redis`, the API and worker must use the same
+`REDIS_URL` and `INDEXING_QUEUE_NAME`. If they differ, jobs can be accepted by
+the API but never picked up by the worker.
+
 ### Indexing Performance
 
 | Variable | Default | Meaning |
@@ -237,6 +265,10 @@ section through `QDRANT_UPSERT_BATCH_SIZE`.
 In production compose, paths refer to paths inside the container, for example
 `/data/images`. You must mount or copy data so the container can actually see
 that path.
+
+`LEGACY_IMAGES_PATH` is named "legacy" because it came from the original
+DeepFashion migration flow, but in the current API it also acts as the default
+indexing folder when `POST /api/v1/index/` omits `images_dir`.
 
 `CAPTIONS_PATH` currently points to a JSON object loaded into worker memory
 during indexing/migration. This is simple and fast for moderate metadata files.
