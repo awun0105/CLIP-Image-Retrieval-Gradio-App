@@ -81,6 +81,25 @@ This separation is intentional:
 - local and production environments share the same code paths with different
   configuration.
 
+### Runtime Object Lifetime
+
+The FastAPI dependency layer in `src/api/dependencies.py` uses `@lru_cache` to
+create process-level singletons for settings, services, and storage clients.
+This matters because these objects are intentionally expensive or stateful:
+
+- `Settings` is parsed once from environment variables and optional dotenv
+  files.
+- `EmbeddingService` is shared so the CLIP model is not re-created per request.
+- `VectorStore` and `ObjectStore` reuse their Qdrant and MinIO clients.
+- `SearchService`, `IndexingService`, and `ImageService` compose those shared
+  dependencies.
+- `IndexingJobBackend` wraps either the in-process job executor or Redis/RQ.
+
+In local or single-container usage, this means one app process owns one set of
+service instances. In production compose, the API container and worker container
+are separate processes, so each process has its own Python singletons while
+sharing external state through Qdrant, MinIO, and Redis.
+
 ## Component Responsibilities
 
 ### FastAPI Application
@@ -91,11 +110,21 @@ FastAPI owns the HTTP boundary:
 - route-level API key dependency for search and indexing;
 - upload byte/content-type checks for image search;
 - `/health` and `/metrics`;
-- CORS and request-id middleware;
+- CORS middleware;
+- request-id middleware that accepts or generates `X-Request-ID`;
+- HTTP request count and latency metrics recorded by middleware;
 - mounted Gradio UI at `/ui`.
 
 The API layer does not directly implement vector search, CLIP inference, or
 MinIO operations. It calls service classes through dependency injection.
+
+Security boundary:
+
+- `/api/v1/search/*` and `/api/v1/index/*` use the API key dependency when
+  `ENABLE_API_KEY_AUTH=true`;
+- `/health` and `/metrics` are intentionally not API-key protected in the
+  current code, so protect them at the network/proxy layer if exposing the
+  service publicly.
 
 ### Gradio UI
 
@@ -125,6 +154,10 @@ Implementation concepts:
 - **Inference gate**: `threading.Condition` allows only one active model
   inference at a time and gives foreground search requests priority over
   background indexing.
+- **Text token truncation**: text queries are tokenized with explicit
+  truncation to the tokenizer's model max length, with a 77-token fallback for
+  CLIP-style tokenizers. This prevents long queries from failing or relying on
+  unclear implicit truncation behavior.
 - **Batch image embedding**: indexing can encode multiple images in one CLIP
   call through `get_image_batch_features`.
 
@@ -157,6 +190,21 @@ Supported search modes:
 - `exact`: exact search, useful for evaluation baseline;
 - `ann_indexed_only`: search only indexed segments.
 
+### ImageService
+
+`ImageService` is a small boundary between search results and object storage.
+Qdrant search returns `image_path`, which is the MinIO object key. The API then
+uses `ImageService` to turn that key into a temporary presigned URL.
+
+Why keep this as a service?
+
+- search logic does not need to know MinIO URL signing details;
+- API responses can include browser-openable URLs without embedding image bytes;
+- future storage changes can stay isolated behind `ImageService`.
+
+The current API returns presigned URLs and does not stream image bytes through
+FastAPI for normal search responses.
+
 ### IndexingService
 
 `IndexingService` handles write/ingestion traffic.
@@ -164,6 +212,11 @@ Supported search modes:
 It scans a local image directory and incrementally reconciles local files with
 Qdrant and MinIO. The goal is to avoid re-encoding and re-uploading unchanged
 images.
+
+Current scan scope: `IndexingService` scans image files directly inside the
+configured directory. It does not recursively walk nested subdirectories. If a
+dataset is organized into subfolders, either flatten it before indexing or add a
+recursive scan mode deliberately.
 
 Implementation concepts:
 
@@ -184,6 +237,12 @@ Implementation concepts:
   writes are then chunked by `QDRANT_UPSERT_BATCH_SIZE`, which is separate from
   `INGEST_BATCH_SIZE`: the first controls Qdrant request size, the second
   controls CLIP image encoding batch size.
+
+Object identity: MinIO object keys currently use `images/<filename>`, and Qdrant
+point ids are derived from that object key. This is simple and works for a flat
+DeepFashion-style image directory. It is not safe for recursive catalogs with
+duplicate filenames in different folders. If recursive indexing is added, object
+keys should use a stable relative path or a content-addressed key.
 
 Counters returned by indexing:
 
@@ -264,6 +323,19 @@ Why use Redis/RQ?
 
 Redis is operational state, not the source of truth for image retrieval. Qdrant
 and MinIO are the important persisted retrieval state.
+
+### MigrationService
+
+`MigrationService` is a legacy bridge, not the main ingestion path. It supports
+older DeepFashion artifacts by:
+
+- uploading legacy image files to MinIO;
+- reading existing `.npy` embeddings and `df.csv` metadata;
+- upserting those existing vectors into Qdrant without running CLIP again.
+
+Use it when migrating old file-based artifacts. For normal current ingestion,
+use the indexing job API or `clip-index-enqueue` so MinIO and Qdrant are
+reconciled through the incremental pipeline.
 
 ### Observability
 
