@@ -42,6 +42,17 @@ checks, but it is not the same as a human-labeled benchmark. A result can be
 visually relevant even if it is not listed in `relevant`, and a category match
 does not guarantee perfect semantic relevance.
 
+Use this included set as a smoke/regression baseline:
+
+- good for detecting obvious regressions after code/config changes;
+- not sufficient to claim final product retrieval quality;
+- not sufficient for comparing different models unless the same indexed data,
+  query file, and search settings are used.
+
+For a real release gate, create a human-reviewed query set where each query has
+multiple acceptable relevant images. Fashion search often has many visually
+valid matches, so a single source image per caption undercounts relevance.
+
 The first recorded run is stored at:
 
 ```text
@@ -186,6 +197,11 @@ Use that result as a baseline, not as a final quality gate. Before treating
 these thresholds as release requirements, improve the query set with multiple
 human-approved relevant images per query.
 
+Because the first baseline had identical ANN and exact metrics, that run did
+not indicate a Qdrant ANN problem. It indicated a model/data/evaluation-label
+limitation: exact search could not find the single weak-label target for many
+queries either.
+
 If exact recall is low, inspect:
 
 - whether the query set labels are too narrow;
@@ -242,6 +258,12 @@ uv run python scripts/benchmark_indexing.py \
 
 The benchmark starts an indexing job, polls until completion/failure, and
 reports counters, duration, and images per minute.
+
+If `INDEXING_JOB_BACKEND=redis`, the API enqueues work and the separate
+`clip-index-worker` process performs ingestion. If `INDEXING_JOB_BACKEND=memory`,
+the API process runs the background job in its local executor. Record which mode
+you used in benchmark reports because their failure modes and restart behavior
+are different.
 
 Counter interpretation:
 

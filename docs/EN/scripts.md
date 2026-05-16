@@ -7,6 +7,26 @@ data paths are used.
 
 Run scripts from the repository root with `uv run python ...`.
 
+Important environment behavior:
+
+- the application automatically reads `.env`;
+- production compose injects `.env.production` through Docker Compose;
+- a standalone `uv run ...` command does not automatically read
+  `.env.production` unless you export those values first.
+
+For one-off production-style commands on a host, use:
+
+```bash
+set -a
+source .env.production
+set +a
+uv run python scripts/<script_name>.py
+```
+
+`set -a` matters because sourced `KEY=value` entries are shell variables by
+default. Child processes such as `uv run` only receive exported environment
+variables.
+
 ## Migration And Storage Utilities
 
 ### `scripts/migrate_to_qdrant.py`
@@ -123,3 +143,8 @@ uv run clip-index-enqueue --images-dir /data/images
 Use `clip-index-worker` for Redis/RQ production-like indexing workers. Use
 `clip-index-enqueue` for manual or scheduled ingestion jobs when
 `INDEXING_JOB_BACKEND=redis`.
+
+When these commands run on the host, `REDIS_URL` must be reachable from the
+host, for example `redis://localhost:6379/0`. When they run inside the
+production compose network, `redis://redis:6379/0` is correct because `redis`
+is the Docker service name.

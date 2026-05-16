@@ -16,6 +16,10 @@ queued/running job state, but it is not the source of truth for retrieval.
 
 Production compose stores Qdrant data in the `qdrant_data` volume.
 
+Docker Compose prefixes named volumes with the compose project name. On many
+hosts the actual volume is named something like
+`<project>_qdrant_data`, not literally `qdrant_data`.
+
 Minimum backup options:
 
 - snapshot the Docker volume at host/storage level;
@@ -37,6 +41,9 @@ Check:
 ## MinIO
 
 Production compose stores MinIO data in the `minio_data` volume.
+
+As with Qdrant, the real Docker volume name may be prefixed by the compose
+project name.
 
 Minimum backup options:
 
@@ -100,7 +107,7 @@ Suggested minimum:
 5. Restore Redis only if preserving queued job state matters.
 6. Start stack with `make prod-up`.
 7. Verify `/health`.
-8. Verify `/metrics`.
+8. Verify `/metrics` if `ENABLE_METRICS=true`; otherwise a `404` is expected.
 9. Run one text search.
 10. Open one returned image URL.
 11. Enqueue one small indexing job and verify completion.

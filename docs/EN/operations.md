@@ -28,7 +28,11 @@ curl http://localhost:8000/metrics
 
 Prometheus scrapes the same endpoint in production compose.
 
-**Note on Availability:** The `/metrics` endpoint is always active if `ENABLE_METRICS=true`. However, the Prometheus dashboard (port `9090`) is only started as part of the [Production Stack](deployment/production.md). In local development, you can verify raw metrics data by visiting `http://localhost:8000/metrics`.
+**Note on availability:** The `/metrics` endpoint returns Prometheus text when
+`ENABLE_METRICS=true`. If `ENABLE_METRICS=false`, it returns `404`. The
+Prometheus dashboard on port `9090` is only started as part of the
+[Production Stack](deployment/production.md). In local development, verify raw
+metrics data by visiting `http://localhost:8000/metrics`.
 
 Important metric groups:
 
@@ -143,6 +147,8 @@ Likely causes:
 - worker container is not running;
 - `INDEXING_JOB_BACKEND` is not `redis`;
 - API and worker use different `REDIS_URL` or queue name.
+- the job was enqueued from the host using a container-only Redis URL such as
+  `redis://redis:6379/0`.
 
 Check:
 
@@ -150,6 +156,10 @@ Check:
 docker compose -f docker-compose.prod.yml ps
 make prod-logs
 ```
+
+If you run `clip-index-enqueue` from the host, use a host-reachable Redis URL
+such as `redis://localhost:6379/0`. Inside production compose, use
+`redis://redis:6379/0`.
 
 ### Search Works But Images Do Not Load
 

@@ -55,12 +55,25 @@ The CLI prints JSON:
 The CLI intentionally requires `INDEXING_JOB_BACKEND=redis`. If the backend is
 `memory`, there is no separate durable queue for a scheduler to use.
 
+If you run the CLI from the host, make sure the environment is exported and
+`REDIS_URL` points to a host-reachable Redis endpoint:
+
+```bash
+set -a
+source .env.production
+set +a
+REDIS_URL=redis://localhost:6379/0 uv run clip-index-enqueue --images-dir "$LEGACY_IMAGES_PATH"
+```
+
+Inside Docker Compose, `REDIS_URL=redis://redis:6379/0` is correct because
+`redis` is the service name on the compose network.
+
 ## Cron Example
 
 Run every night at 02:00:
 
 ```cron
-0 2 * * * cd /srv/clip-fashion-product-retrieval && /usr/bin/env bash -lc 'source .env.production && uv run clip-index-enqueue --images-dir "$LEGACY_IMAGES_PATH" >> logs/indexing.log 2>&1'
+0 2 * * * cd /srv/clip-fashion-product-retrieval && /usr/bin/env bash -lc 'set -a; source .env.production; set +a; uv run clip-index-enqueue --images-dir "$LEGACY_IMAGES_PATH" >> logs/indexing.log 2>&1'
 ```
 
 Notes:
@@ -68,6 +81,8 @@ Notes:
 - Make sure `logs/` exists.
 - Make sure the path in `LEGACY_IMAGES_PATH` exists from the scheduler's
   perspective.
+- Use `set -a` when sourcing `.env.production`; otherwise the variables may not
+  be exported to the `uv run` child process.
 - In Docker-only production, prefer running the CLI inside the app image or
   call the API endpoint instead.
 
@@ -121,6 +136,10 @@ curl -X POST http://localhost:8000/api/v1/index/ \
 ```
 
 This still enqueues a Redis/RQ job when production config is used.
+
+The API-based path requires the image directory to exist from the API
+container's perspective. For bind-mounted deployments, that usually means the
+container path, not the host-only path.
 
 ## Failure Handling
 
