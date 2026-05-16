@@ -31,6 +31,7 @@ class Settings(BaseSettings):
     qdrant_hnsw_ef: int = 128
     qdrant_indexing_threshold: int = 5000
     qdrant_full_scan_threshold: int = 5000
+    qdrant_upsert_batch_size: int = 100
     search_mode_default: str = "ann"
 
     # Indexing performance
@@ -51,6 +52,8 @@ class Settings(BaseSettings):
     minio_secret_key: str = "minioadmin"
     minio_bucket: str = "fashion-images"
     minio_secure: bool = False
+    minio_public_endpoint: str | None = None
+    minio_region: str = "us-east-1"
 
     # Legacy (migrate)
     legacy_images_path: Path | None = Path("./DeepFashion/images")

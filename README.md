@@ -2,18 +2,22 @@
 
 # CLIP Fashion-Products Image Retrieval Engine
 
-A multimodal search engine specialized for fashion, powered by AI. Search your product collection using natural language or visual similarity.
+A CLIP-based image retrieval service for fashion product catalogs. It supports
+text-to-image and image-to-image search, stores vectors in Qdrant, stores image
+objects in MinIO, and runs indexing as background jobs through Redis/RQ in the
+production stack.
 
-*Checkout the links:*
+The repository provides the retrieval service layer: API, UI, indexing worker,
+storage adapters, metrics, deployment configuration, and evaluation tooling. It
+does not include unrelated product-platform features such as user accounts,
+billing, inventory management, or multi-tenant authorization.
+
+## Links
 
 [![Hugging Face Space](https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-Space-yellow)](https://huggingface.co/spaces/anhquanlam/CLIP-Fashion-Product-Search)
 [![Model on HF](https://img.shields.io/badge/%F0%9F%A4%97%20Model-DeepFashion_CLIP-orange)](https://huggingface.co/anhquanlam/clip-finetuned-deepfashion)
 [![Dataset on HF](https://img.shields.io/badge/%F0%9F%A4%97%20Dataset-DeepFashion_Multimodal-green)](https://huggingface.co/datasets/anhquanlam/clip-deepfashion-multimodal)
 [![YouTube Demo](https://img.shields.io/badge/YouTube-Project_Demo-red?logo=youtube)](https://www.youtube.com/watch?v=6h3SuES8a-M)
-
-*Note: This is a production-oriented MVP visual search service. The core
-retrieval pipeline is complete; production deployment now includes CI, Redis/RQ
-workers, API key protection, metrics, and operational runbooks.*
 
 ## Screenshots
 
@@ -30,18 +34,6 @@ workers, API key protection, metrics, and operational runbooks.*
 </p>
 
 <p align="center">
-  <img src="https://github.com/user-attachments/assets/3bec63d3-860b-4634-9351-93820f587b9a" alt="Watch Results" width="800">
-  <br>
-  <em>click and watch result</em>
-</p>
-
-<p align="center">
-  <img src="https://github.com/user-attachments/assets/c68b08d2-27be-4276-9afa-8762e13674b0" alt="Jean Jacket Search" width="800">
-  <br>
-  <em>Text Search: "Jean Jacket" results</em>
-</p>
-
-<p align="center">
   <img src="https://github.com/user-attachments/assets/35eb958f-4707-4010-8d76-26f0668e5a92" alt="Image Upload" width="800">
   <br>
   <em>Image Upload Workflow</em>
@@ -53,234 +45,236 @@ workers, API key protection, metrics, and operational runbooks.*
   <em>Visual Similarity Search Results</em>
 </p>
 
-## Table of Contents
+## What It Does
 
-- [Screenshots](#screenshots)
-- [Value Proposition](#value-proposition)
-- [Repository Structure](#repository-structure)
-- [Technical Architecture](#technical-architecture)
-- [System Workflow](#system-workflow)
-- [Component Breakdown](#component-breakdown)
-- [Prerequisites](#prerequisites)
-- [Quickstart Guide](#quickstart-guide)
-- [Production Deployment](#production-deployment)
-- [Evaluation & Benchmarking](#evaluation--benchmarking)
-- [License](#license)
+- **Text search**: type a natural-language query such as `red dress` or
+  `black leather jacket`, embed it with CLIP, and retrieve visually relevant
+  fashion images.
+- **Image search**: upload a reference image, embed it with CLIP, and retrieve
+  visually similar catalog items.
+- **Incremental indexing**: scan local image folders and only encode/upload
+  new or changed files by checking file metadata and SHA256 content hashes.
+  Indexing retrieves only the Qdrant payload fields needed for state checks and
+  writes vectors in configurable Qdrant upsert batches.
+- **Background ingestion**: submit indexing jobs through the API or CLI; in the
+  production stack Redis/RQ runs the long work outside the API request path.
+- **Runtime operations**: API key auth, upload guardrails, Prometheus
+  metrics for API and UI searches, structured logs, Docker production compose,
+  CI, backup/restore docs, and evaluation/benchmark tools.
 
-## Value Proposition
+## Architecture At A Glance
 
-Unlike generic image search tools, this engine is purpose-built for the fashion industry, combining domain-specific AI with a robust infrastructure stack.
+```mermaid
+flowchart LR
+    Client["Browser / API Client"] --> API["FastAPI + Gradio"]
+    API --> Search["SearchService"]
+    API --> Jobs["IndexingJobBackend"]
+    Search --> Embed["EmbeddingService<br/>CLIP"]
+    Search --> Qdrant[("Qdrant<br/>vectors")]
+    Search --> MinIO[("MinIO<br/>images")]
+    Jobs --> Redis[("Redis / RQ")]
+    Redis --> Worker["Indexing Worker"]
+    Worker --> Embed
+    Worker --> MinIO
+    Worker --> Qdrant
+    API --> Metrics["/metrics<br/>Prometheus"]
+```
 
-- **Domain-Specific CLIP:** Utilizes `anhquanlam/clip-finetuned-deepfashion`, a model fine-tuned for **30 epochs on DeepFashion**, enabling it to perceive nuanced garment attributes like textures, silhouette cuts, and intricate fashion styles.
-- **Multimodal Flexibility:** Seamlessly handles both Natural Language (text) and Visual Similarity (image) queries within the same shared embedding space.
-- **State-Aware Indexing:** Implements an intelligent pipeline that uses SHA256 content hashing and metadata tracking to skip redundant re-encoding, significantly reducing GPU overhead during dataset updates.
-- **Cloud-Native Storage:** Leverages **Qdrant** for high-performance vector retrieval and **MinIO** for secure, scalable object storage, ensuring the system is ready for production deployment.
-- **Production Readiness:** Adds Redis/RQ durable indexing jobs, API key protection, configurable upload guardrails, Prometheus metrics, structured logs, CI validation, and deployment runbooks.
+The service separates responsibilities:
+
+- FastAPI exposes API routes and mounts the Gradio UI.
+- CLIP converts text/images into vectors.
+- Qdrant performs cosine similarity search over vectors.
+- MinIO stores image objects and returns presigned URLs.
+- `MINIO_PUBLIC_ENDPOINT` keeps returned presigned URLs browser-reachable when
+  the app talks to MinIO through an internal Docker hostname.
+- Redis/RQ decouples long indexing jobs from HTTP requests.
+- Prometheus reads `/metrics` for operational visibility.
+
+For full details, start with the documentation map:
+
+[docs/README.md](docs/README.md)
 
 ## Repository Structure
 
-### Project Tree
-
 ```text
-CLIP-Image-Retrieval/
+.
 ├── src/
-│   ├── api/            # FastAPI routes & REST controllers
-│   ├── core/           # Business logic: AI, search & background indexing
-│   ├── db/             # Data access: Qdrant & MinIO wrappers
-│   ├── ui/             # Gradio Web UI implementation
-│   ├── config.py       # Pydantic Settings & Environment config
-│   ├── server.py       # Main entrypoint: Wires API + UI
-│   ├── worker.py       # RQ worker entrypoint for indexing jobs
-│   └── index_enqueue.py # CLI entrypoint to enqueue indexing jobs
-├── scripts/            # Migration, evaluation & benchmark tools
-├── tests/              # Comprehensive test suite (API & Core)
-├── docs/               # Architecture, evaluation and deployment runbooks
-├── ops/                # Production ops config such as Prometheus
-├── Notebook for finetuning/  # CLIP training on DeepFashion
-├── docker-compose.yml  # Multi-container stack definition
-├── docker-compose.prod.yml # Production compose stack
-├── Dockerfile          # Optimized build via 'uv'
-├── pyproject.toml      # Dependency management
-└── Makefile            # Developer shortcut commands
+│   ├── api/              # FastAPI app, routes, security, schemas, DI
+│   ├── core/             # Embedding, search, indexing, jobs, metrics, logging
+│   ├── db/               # Qdrant, MinIO, migration wrappers
+│   ├── ui/               # Gradio UI mounted at /ui
+│   ├── server.py         # clip-retrieval entrypoint
+│   ├── worker.py         # clip-index-worker RQ worker
+│   └── index_enqueue.py  # clip-index-enqueue CLI
+├── scripts/              # Migration, evaluation, benchmark utilities
+├── evaluation/           # Weak-label query set and report templates
+├── tests/                # Unit/API tests with fakes and in-memory Qdrant
+├── docs/
+│   ├── README.md         # Documentation map
+│   ├── EN/               # English documentation
+│   └── VN/               # Vietnamese docs placeholder for a later pass
+├── Source-huggingface/   # Legacy Hugging Face Spaces implementation
+├── ops/prometheus/       # Prometheus scrape config
+├── docker-compose.yml    # Local/simple compose stack
+├── docker-compose.prod.yml
+├── Dockerfile
+├── Makefile
+└── pyproject.toml
 ```
 
-### Main components details
+## Local Development Quickstart
 
-| Directory / File | Description |
-| :--- | :--- |
-| **`src/core/`** | The "brain" of the app. Handles CLIP inference (lazy-loaded), search coordination, and incremental indexing with SHA256 hashing. |
-| **`src/db/`** | Abstraction layer for persistence. Manages Qdrant vector collections and MinIO object storage (S3-compatible). |
-| **`src/api/`** | Exposes the service via REST. Includes health checks, asynchronous indexing job management, and search endpoints. |
-| **`src/ui/`** | A user-friendly interface built with Gradio, mounted as a sub-app of the main FastAPI service. |
-| **`scripts/`** | Utilities for migrations, retrieval evaluation, search benchmarks, and indexing benchmarks. |
-| **`config.py`** | Centralized configuration using `pydantic-settings`. Supports `.env` files and environment overrides. |
-| **`docs/deployment/`** | Production deployment, scheduled ingestion, and backup/restore runbooks. |
-
-## Technical Architecture
-
-The engine is built on a modular **Service-Oriented Architecture** (SOA), ensuring a clean separation between AI inference, data persistence, and the presentation layer.
-
-### System Diagram
-
-```mermaid
-flowchart TD
-    Client["User / Client (Browser)"] -- "HTTP / JSON" --> App["FastAPI Application (uvicorn)"]
-
-    subgraph Architecture ["Architecture Components"]
-        direction TB
-        App --> DI["DI Container (lru_cache)"]
-
-        subgraph SL ["Service Layer"]
-            direction TB
-            ES["EmbeddingService"]
-            SS["SearchService"]
-            IX["IndexingService"]
-            IS["ImageService"]
-        end
-
-        subgraph DL ["Data Layer"]
-            direction TB
-            VS["VectorStore (Qdrant)"]
-            OS["ObjectStore (MinIO)"]
-            MS["MigrationService"]
-        end
-
-        subgraph PL ["Presentation Layer"]
-            direction TB
-            UI["Gradio Web UI (/ui)"]
-            DOC["Swagger Docs (/docs)"]
-            API["REST Endpoints"]
-        end
-
-        DI --> SL
-        DI --> DL
-        App --> PL
-    end
-```
-
-### Detailed Tech Stack
-
-| Category | Tools & Technologies |
-| :--- | :--- |
-| **Core AI** | **CLIP (ViT-B/16)** fine-tuned with PyTorch & Transformers. Optimized for fashion semantics. |
-| **Databases & Queue** | **Qdrant** (Vector Database) with HNSW indexing; **MinIO** (S3-compatible) for object storage; **Redis/RQ** for durable indexing jobs. |
-| **Backend** | **FastAPI** (High-performance web framework); **Pydantic v2** for validation & settings. |
-| **Frontend** | **Gradio v5** for the interactive dashboard, mounted as a sub-app. |
-| **Observability** | **Prometheus metrics**, request IDs, and structured JSON logs for production diagnostics. |
-| **Deployment** | **Docker & Docker Compose** for container orchestration; **uv** for fast dependency resolution; GitHub Actions for CI validation. |
-| **Testing & Evaluation** | **Pytest** with async support; retrieval quality evaluation; API search and indexing benchmarks. |
-
-## System Workflow
-
-The platform operates through a coordinated pipeline across its core services:
-
-1. **Ingestion Job:** The API or CLI enqueues an indexing job. In production, Redis/RQ stores job state durably and the worker executes ingestion outside the API process.
-2. **State Check:** The `IndexingService` scans local directories, computing unique fingerprints for each image. It cross-references these with existing records to ensure only new or modified assets are processed.
-3. **Feature Extraction:** The `EmbeddingService` employs the fine-tuned CLIP model to project images into 512-dimensional latent vectors, capturing the essential visual "essence" of the apparel.
-4. **Storage & Persistence:** Processed images are persisted in **MinIO**, while their corresponding vectors and metadata are upserted into **Qdrant** using an idempotent ID system based on `uuid5`.
-5. **Similarity Retrieval:** The `SearchService` translates user queries into the same vector space and performs ANN/exact search in Qdrant, returning ranked results with secure, time-limited presigned URLs.
-
-## Component Breakdown
-
-### 1. Service Layer (`src/core/`)
-
-- **`EmbeddingService`**: Handles CLIP model lifecycle. Features **Lazy Loading** (model only loads upon first request) and **Inference Gating** using `threading.Condition` to prioritize search requests over background indexing.
-- **`IndexingService`**: A robust pipeline for dataset ingestion. It implements **Incremental Processing** via SHA256 content hashing to ensure each image is only encoded once.
-- **`SearchService`**: The primary orchestrator for multimodal queries, converting inputs into vectors and managing retrieval logic.
-- **`ImageService`**: A security-focused façade that generates **Time-Limited Presigned URLs** for images, ensuring assets are not exposed directly to the public internet.
-
-### 2. Data Layer (`src/db/`)
-
-- **`VectorStore`**: A high-performance wrapper for Qdrant. Configured with **HNSW (M=32, ef_construct=200)** for high-recall ANN search. Uses **UUID5** mapping for idempotent point management.
-- **`ObjectStore`**: Manages the lifecycle of image binaries in MinIO. Supports automated bucket provisioning and multi-worker file streaming.
-- **`MigrationService`**: Facilitates the transition from legacy V1 (file-based) to V2 (database-backed) by bulk-loading existing embeddings and images.
-
-### 3. API & UI Layer
-
-- **FastAPI Core (`src/api/`)**: Utilizes a sophisticated **Dependency Injection** system (cached via `lru_cache`) to manage service singletons and database connections.
-- **Production API Controls**: Supports API key auth, configurable image upload guardrails, request ids, `/health`, and `/metrics`.
-- **Gradio Dashboard (`src/ui/`)**: A reactive interface providing real-time similarity feedback, score visualization, and multimodal query toggling.
-- **App Entrypoint (`server.py`)**: Wires all components together, mounting the UI onto the API and configuring global logging and CORS policies.
-
-## Prerequisites
-
-Before running the project, ensure you have the following installed:
-
-- **Docker & Docker Compose**: (Highly Recommended) For one-click orchestration of the app, Qdrant, and MinIO.
-- **Python 3.11+**: For local development.
-- **uv**: Astral's fast Python package manager (required for local setup via `make`).
-- **Make**: To run developer shortcut commands.
-- **Redis**: Required for production Redis/RQ indexing jobs.
-
-## Quickstart Guide
-
-### 1. Local Docker Demo
+Use this when you are coding/debugging on your laptop.
 
 ```bash
-git clone https://github.com/your-username/CLIP-Image-Retrieval-Gradio-App.git
-cd CLIP-Image-Retrieval-Gradio-App
-docker compose up -d
+make dev
+cp .env.example .env
+docker compose up -d qdrant minio
+make run
 ```
 
-- **Web UI:** [http://localhost:8000/ui](http://localhost:8000/ui)
-- **API Docs:** [http://localhost:8000/docs](http://localhost:8000/docs)
-- **Health Check:** [http://localhost:8000/health](http://localhost:8000/health)
-- **MinIO Console:** [http://localhost:9001](http://localhost:9001) (Login: `minioadmin` / `minioadmin`)
+Open:
 
-### 2. Local Development
+- UI: <http://localhost:8000/ui>
+- API docs: <http://localhost:8000/docs>
+- Health: <http://localhost:8000/health>
+- Metrics: <http://localhost:8000/metrics>
+- MinIO Console: <http://localhost:9001> (`minioadmin` / `minioadmin` by default)
 
-```bash
-make install
+Local development usually uses `.env`, `localhost` service endpoints, and API
+key auth disabled for convenience.
 
-cp .env.example .env  # Configure your settings
+Before search returns useful results, index an image folder through the UI or
+the indexing API. The default local data paths point at `DeepFashion/` if that
+dataset exists on your machine.
 
-docker compose up -d qdrant minio #start database and object storage
+Detailed guide: [docs/EN/local-development.md](docs/EN/local-development.md)
 
-make run #start backend api
-```
+## Production Stack Quickstart
 
-## Production Deployment
-
-Production compose uses separate `app` and `worker` services plus Redis,
-Qdrant, MinIO, and Prometheus.
+Use this when you want to run the service like a VPS deployment. Running the
+production stack locally is a close Docker Compose simulation of how it would
+run on a single VPS.
 
 ```bash
 cp .env.production.example .env.production
-# edit secrets in .env.production
+# Edit .env.production: API_KEY, MinIO credentials, paths.
 make prod-config
 make prod-build
 make prod-up
+make prod-logs
 ```
 
-Manual settings required:
+Production compose starts:
 
-- Replace `API_KEY`.
-- Replace MinIO root/app credentials.
-- Set production data paths and backup locations.
+- `app`: FastAPI + Gradio
+- `worker`: RQ indexing worker
+- `redis`: queue and job metadata
+- `qdrant`: vector database
+- `minio`: object storage
+- `prometheus`: metrics scraper
 
-Runbooks:
+`API_KEY`, `MINIO_ROOT_USER`, `MINIO_ROOT_PASSWORD`, `MINIO_ACCESS_KEY`, and
+`MINIO_SECRET_KEY` are operator-created secrets. The example file only provides
+placeholder values; replace them before running a real deployment.
 
-- [Production deployment](docs/deployment/production.md)
-- [Scheduled ingestion](docs/deployment/scheduled-ingestion.md)
-- [Backup and restore](docs/deployment/backup-restore.md)
+Detailed guide: [docs/EN/deployment/production.md](docs/EN/deployment/production.md)
 
-## Evaluation & Benchmarking
+## API Examples
 
-The repo includes tools to evaluate retrieval quality and operational
-performance:
+Text search:
 
 ```bash
-uv run python scripts/evaluate_retrieval.py --queries eval_queries.jsonl --top-k 10
-uv run python scripts/benchmark_search.py --requests 100 --concurrency 10
-uv run python scripts/benchmark_indexing.py --images-dir /path/to/images
+curl -X POST http://localhost:8000/api/v1/search/text \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: $API_KEY" \
+  -d '{"query": "red dress", "top_k": 5, "search_mode": "ann"}'
 ```
 
-See [docs/evaluation.md](docs/evaluation.md) for query-set format, metrics and
-release-time evaluation guidance.
+Start indexing:
+
+```bash
+curl -X POST http://localhost:8000/api/v1/index/ \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: $API_KEY" \
+  -d '{"images_dir": "/data/images"}'
+```
+
+Poll an indexing job:
+
+```bash
+curl -H "X-API-Key: $API_KEY" \
+  http://localhost:8000/api/v1/index/<job_id>
+```
+
+API guide: [docs/EN/api.md](docs/EN/api.md)
+
+## Evaluation And Benchmarking
+
+Evaluate retrieval quality with the included DeepFashion weak-label query set:
+
+```bash
+uv run python scripts/evaluate_retrieval.py \
+  --base-url http://localhost:8000 \
+  --queries evaluation/deepfashion_weak_labels.jsonl \
+  --top-k 10 \
+  --search-mode ann \
+  --api-key "$API_KEY"
+```
+
+Benchmark search latency:
+
+```bash
+uv run python scripts/benchmark_search.py \
+  --base-url http://localhost:8000 \
+  --query "red dress" \
+  --requests 100 \
+  --concurrency 10 \
+  --api-key "$API_KEY"
+```
+
+Evaluation guide: [docs/EN/evaluation.md](docs/EN/evaluation.md)
+Maintenance scripts guide: [docs/EN/scripts.md](docs/EN/scripts.md)
+
+The included query set is derived from the DeepFashion dataset filenames and is
+intended as a repeatable weak-label baseline, not a human-labeled gold
+benchmark.
+
+## Development Checks
+
+```bash
+uv run pytest tests/ -v
+uv run ruff check src/ tests/ scripts/
+uv run mypy src tests
+docker build -t clip-image-retrieval:v3-smoke .
+```
+
+## Documentation
+
+Start here:
+
+[docs/README.md](docs/README.md)
+
+The English documentation under `docs/EN/` is the current authoritative
+documentation set. The Vietnamese documentation folder is reserved for a later
+translation pass.
+
+Key docs:
+
+- [Overview](docs/EN/overview.md): project scope and service boundaries.
+- [Architecture](docs/EN/architecture.md): components and implementation ideas.
+- [Data flows](docs/EN/data-flow.md): search, indexing, metrics, and storage flows.
+- [Configuration](docs/EN/configuration.md): `.env`, `.env.production`, and all settings.
+- [Operations](docs/EN/operations.md): health, metrics, logs, jobs, and incidents.
+- [Scheduled ingestion](docs/EN/deployment/scheduled-ingestion.md): CLI, cron, and systemd ingestion.
+- [Backup and restore](docs/EN/deployment/backup-restore.md): state groups and recovery checks.
+
+`Source-huggingface/` is the legacy Hugging Face Spaces implementation. Treat
+the current FastAPI/Qdrant/MinIO service under `src/` as the main codebase.
 
 ## License
 
-Distributed under the MIT License. See `LICENSE` for more information.
+Distributed under the MIT License. See [LICENSE](LICENSE).
 
-----
 <p align="right">(<a href="#readme-top">back to top</a>)</p>

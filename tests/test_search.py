@@ -5,6 +5,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 from PIL import Image
+from prometheus_client import generate_latest
 
 from core.search import SearchService
 
@@ -41,3 +42,15 @@ def test_search_by_image_returns_results(vector_store, fake_embedding_service):
     img = Image.new("RGB", (4, 4))
     results = svc.search_by_image(img, top_k=2)
     assert len(results) == 2
+
+
+def test_search_service_records_latency_metric(vector_store, fake_embedding_service):
+    _seed_collection(vector_store)
+    svc = SearchService(fake_embedding_service, vector_store)
+    before = generate_latest().decode()
+
+    svc.search_by_text("red dress", top_k=1)
+
+    after = generate_latest().decode()
+    assert 'clip_search_duration_seconds_count{kind="text",mode="ann"}' in after
+    assert after != before

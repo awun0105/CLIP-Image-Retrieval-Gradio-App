@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import uuid
+from collections.abc import Sequence
 
 import numpy as np
 from qdrant_client import QdrantClient
@@ -22,7 +23,6 @@ from core.schemas import SearchMode
 logger = logging.getLogger(__name__)
 
 VECTOR_DIM = 512  # CLIP ViT-B/16 latent dim
-BATCH_SIZE = 100
 
 
 class VectorStore:
@@ -71,8 +71,17 @@ class VectorStore:
         """Return a point payload by object key, or ``None`` when missing."""
         return self.get_payloads([object_key]).get(object_key)
 
-    def get_payloads(self, object_keys: list[str]) -> dict[str, dict]:
-        """Return payloads for multiple object keys in one Qdrant request."""
+    def get_payloads(
+        self,
+        object_keys: list[str],
+        payload_fields: Sequence[str] | None = None,
+    ) -> dict[str, dict]:
+        """Return payloads for multiple object keys in one Qdrant request.
+
+        ``payload_fields`` can limit the returned payload keys when callers only
+        need indexing state, reducing network and memory overhead for large
+        payloads.
+        """
         if not object_keys:
             return {}
         ids_by_key = {key: self.point_id_for_key(key) for key in object_keys}
@@ -80,7 +89,7 @@ class VectorStore:
         records = self.client.retrieve(
             collection_name=self.collection_name,
             ids=list(ids_by_key.values()),
-            with_payload=True,
+            with_payload=list(payload_fields) if payload_fields is not None else True,
             with_vectors=False,
         )
         payloads: dict[str, dict] = {}
@@ -97,10 +106,11 @@ class VectorStore:
         captions: dict[str, str] | None = None,
         metadata_by_key: dict[str, dict] | None = None,
     ) -> None:
-        """Upsert ``(key, embedding)`` pairs in batches of ``BATCH_SIZE``."""
+        """Upsert ``(key, embedding)`` pairs in configured Qdrant write batches."""
         captions = captions or {}
         metadata_by_key = metadata_by_key or {}
         points: list[PointStruct] = []
+        batch_size = max(1, self.settings.qdrant_upsert_batch_size)
         for key, emb in zip(object_keys, embeddings, strict=False):
             filename = key.split("/")[-1]
             caption = captions.get(filename)
@@ -117,7 +127,7 @@ class VectorStore:
                     payload=payload,
                 )
             )
-            if len(points) >= BATCH_SIZE:
+            if len(points) >= batch_size:
                 self.client.upsert(collection_name=self.collection_name, points=points)
                 points = []
 

@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import logging
+from time import perf_counter
 from typing import TYPE_CHECKING
 
 from PIL import Image
 
 from core.embedding import EmbeddingService
+from core.metrics import SEARCH_LATENCY
 from core.schemas import SearchMode, SearchResult
 
 if TYPE_CHECKING:
@@ -32,9 +34,14 @@ class SearchService:
     ) -> list[SearchResult]:
         if not query or not query.strip():
             raise ValueError("Query text cannot be empty")
-        embedding = self.embedding.get_text_features(query)
-        results = self.vector_store.search(embedding, top_k, search_mode, hnsw_ef)
-        return [SearchResult(**r) for r in results]
+        start = perf_counter()
+        mode = self._metric_mode(search_mode)
+        try:
+            embedding = self.embedding.get_text_features(query)
+            results = self.vector_store.search(embedding, top_k, search_mode, hnsw_ef)
+            return [SearchResult(**r) for r in results]
+        finally:
+            SEARCH_LATENCY.labels("text", mode).observe(perf_counter() - start)
 
     def search_by_image(
         self,
@@ -43,6 +50,15 @@ class SearchService:
         search_mode: SearchMode | str | None = None,
         hnsw_ef: int | None = None,
     ) -> list[SearchResult]:
-        embedding = self.embedding.get_image_features(image)
-        results = self.vector_store.search(embedding, top_k, search_mode, hnsw_ef)
-        return [SearchResult(**r) for r in results]
+        start = perf_counter()
+        mode = self._metric_mode(search_mode)
+        try:
+            embedding = self.embedding.get_image_features(image)
+            results = self.vector_store.search(embedding, top_k, search_mode, hnsw_ef)
+            return [SearchResult(**r) for r in results]
+        finally:
+            SEARCH_LATENCY.labels("image", mode).observe(perf_counter() - start)
+
+    def _metric_mode(self, search_mode: SearchMode | str | None) -> str:
+        mode = search_mode or self.vector_store.settings.search_mode_default
+        return SearchMode(mode).value

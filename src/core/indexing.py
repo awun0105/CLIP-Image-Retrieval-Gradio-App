@@ -30,6 +30,12 @@ logger = logging.getLogger(__name__)
 
 _IMAGE_EXTS = {".jpg", ".jpeg", ".png"}
 STATE_LOOKUP_BATCH_SIZE = 512
+INDEX_STATE_PAYLOAD_FIELDS = (
+    "file_size",
+    "modified_at",
+    "content_hash",
+    "image_path",
+)
 
 
 @dataclass
@@ -193,7 +199,8 @@ class IndexingService:
                         progress.update(1)
 
                 payloads = self.vector_store.get_payloads(
-                    [object_key for _img_path, object_key, _metadata in chunk_items]
+                    [object_key for _img_path, object_key, _metadata in chunk_items],
+                    payload_fields=INDEX_STATE_PAYLOAD_FIELDS,
                 )
 
                 for img_path, object_key, metadata in chunk_items:
