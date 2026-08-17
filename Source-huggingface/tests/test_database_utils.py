@@ -1,68 +1,81 @@
-import shutil
-import zipfile
+import hashlib
+import json
 from pathlib import Path
 
 import database_utils
 import pytest
 
 
-def _clear_config_environment(monkeypatch):
-    for key in database_utils.DEFAULTS:
-        monkeypatch.delenv(key, raising=False)
+def _sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def _write_artifacts(root: Path):
-    (root / "DeepFashion/images").mkdir(parents=True)
-    (root / "DeepFashion/embed_data").mkdir(parents=True)
-    (root / "DeepFashion/embed_data/df.csv").write_text("image_path\na.jpg\n")
-    (root / "DeepFashion/embed_data/df_image_embeds.npy").write_bytes(b"npy")
-    (root / "DeepFashion/captions.json").write_text("{}")
-
-
-def test_existing_dataset_skips_download(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
-    _clear_config_environment(monkeypatch)
-    _write_artifacts(tmp_path)
-    monkeypatch.setattr(
-        database_utils.urllib.request,
-        "urlretrieve",
-        lambda *_args: pytest.fail("download should be skipped"),
+def _write_release(tmp_path: Path) -> Path:
+    release = tmp_path / "release"
+    files = {
+        "index/keyframes.faiss": b"faiss",
+        "index/embeddings.f16.npy": b"embeddings",
+        "metadata/runtime.sqlite": b"sqlite",
+    }
+    artifacts = {}
+    for relative_path, contents in files.items():
+        path = release / relative_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(contents)
+        artifacts[relative_path] = {"size_bytes": len(contents), "sha256": _sha256(path)}
+    manifest = {
+        "schema_version": 1,
+        "release_id": "test-v1",
+        "artifacts": artifacts,
+    }
+    manifest_path = release / "manifest.json"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    (release / "READY.json").write_text(
+        json.dumps(
+            {
+                "release_id": "test-v1",
+                "manifest_sha256": _sha256(manifest_path),
+            }
+        ),
+        encoding="utf-8",
     )
-    env = database_utils.download_and_prepare_dataset()
-    assert env["INDEX_PATH"] == "./DeepFashion/embed_data"
+    return release
 
 
-def test_download_extracts_and_validates_default_layout(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
-    _clear_config_environment(monkeypatch)
-    source_archive = tmp_path / "source.zip"
-    with zipfile.ZipFile(source_archive, "w") as archive:
-        archive.writestr("DeepFashion/images/a.jpg", b"image")
-        archive.writestr("DeepFashion/embed_data/df.csv", "image_path\na.jpg\n")
-        archive.writestr("DeepFashion/embed_data/df_image_embeds.npy", b"npy")
-        archive.writestr("DeepFashion/captions.json", "{}")
-
-    def fake_download(_url, destination):
-        shutil.copyfile(source_archive, destination)
-
-    monkeypatch.setattr(database_utils.urllib.request, "urlretrieve", fake_download)
-    database_utils.download_and_prepare_dataset()
-    assert (tmp_path / "DeepFashion/images/a.jpg").exists()
-    assert not (tmp_path / "DeepFashion.zip").exists()
+def test_prepare_runtime_copies_verified_artifacts(tmp_path, monkeypatch):
+    release = _write_release(tmp_path)
+    cache = tmp_path / "cache"
+    monkeypatch.setenv("DATA_ROOT", str(release))
+    monkeypatch.setenv("CACHE_ROOT", str(cache))
+    runtime = database_utils.prepare_runtime(tmp_path / "missing.env")
+    assert runtime.index_file.read_bytes() == b"faiss"
+    assert runtime.embeddings_file.read_bytes() == b"embeddings"
+    assert runtime.sqlite_file.read_bytes() == b"sqlite"
 
 
-def test_safe_extract_rejects_path_traversal(tmp_path):
-    archive_path = tmp_path / "unsafe.zip"
-    with zipfile.ZipFile(archive_path, "w") as archive:
-        archive.writestr("../outside.txt", "bad")
-    with zipfile.ZipFile(archive_path) as archive:
-        with pytest.raises(ValueError, match="Unsafe path"):
-            database_utils._safe_extract(archive, tmp_path / "extract")
+def test_prepare_runtime_repairs_corrupt_cached_file(tmp_path, monkeypatch):
+    release = _write_release(tmp_path)
+    monkeypatch.setenv("DATA_ROOT", str(release))
+    monkeypatch.setenv("CACHE_ROOT", str(tmp_path / "cache"))
+    runtime = database_utils.prepare_runtime(tmp_path / "missing.env")
+    runtime.index_file.write_bytes(b"corrupt")
+    repaired = database_utils.prepare_runtime(tmp_path / "missing.env")
+    assert repaired.index_file.read_bytes() == b"faiss"
 
 
-def test_custom_incomplete_paths_fail_without_download(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
-    _clear_config_environment(monkeypatch)
-    monkeypatch.setenv("DEFAULT_IMAGES_PATH", "custom/images")
-    with pytest.raises(FileNotFoundError, match="Custom dataset paths are incomplete"):
-        database_utils.download_and_prepare_dataset()
+def test_prepare_runtime_rejects_incomplete_release(tmp_path, monkeypatch):
+    release = _write_release(tmp_path)
+    (release / "READY.json").unlink()
+    monkeypatch.setenv("DATA_ROOT", str(release))
+    monkeypatch.setenv("CACHE_ROOT", str(tmp_path / "cache"))
+    with pytest.raises(FileNotFoundError, match="not ready"):
+        database_utils.prepare_runtime(tmp_path / "missing.env")
+
+
+def test_prepare_runtime_rejects_manifest_tampering(tmp_path, monkeypatch):
+    release = _write_release(tmp_path)
+    (release / "manifest.json").write_text("{}", encoding="utf-8")
+    monkeypatch.setenv("DATA_ROOT", str(release))
+    monkeypatch.setenv("CACHE_ROOT", str(tmp_path / "cache"))
+    with pytest.raises(ValueError, match="checksum"):
+        database_utils.prepare_runtime(tmp_path / "missing.env")

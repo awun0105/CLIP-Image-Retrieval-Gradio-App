@@ -1,98 +1,130 @@
-from pathlib import Path
+import inspect
 
-import pytest
-from app import DEFAULT_FAISS_NPROBE, _ScanController, _use_faiss, build_app
-from schemas import SearchResult
+from app import (
+    SearchController,
+    _detail_markdown,
+    _keyframe_directory,
+    _timestamp,
+    build_app,
+    search_keyframes_gpu,
+)
+from schemas import KeyframeDetails, SearchResult
 
 
 class FakeSearchMechanism:
-    def query_by_text(self, _text, _top_k, _use_faiss, _nprobe=None):
-        return []
+    def filter_options(self):
+        return {
+            "collections": ["C01"],
+            "videos": ["V01"],
+            "objects": ["Person"],
+            "authors": ["Alice"],
+        }
 
-    def query_by_image(self, _image, _top_k, _use_faiss, _nprobe=None):
-        return []
-
-    def scan_directory(self, _path, **_kwargs):
-        return 0
-
-
-def test_scan_controller_supports_cooperative_cancel():
-    controller = _ScanController()
-    assert not controller.cancel()
-    controller.begin()
-    assert controller.cancel()
-    assert controller.cancel_event.is_set()
-    controller.finish()
+    def get_keyframe_details(self, _keyframe_id):
+        return KeyframeDetails({}, {})
 
 
-def test_search_mode_maps_to_local_backends():
-    assert _use_faiss("faiss") is True
-    assert _use_faiss("exact") is False
-    with pytest.raises(ValueError, match="Unsupported search mode"):
-        _use_faiss("ann_indexed_only")
-
-
-def test_build_app_preserves_public_endpoint_names(tmp_path):
-    app = build_app(FakeSearchMechanism(), str(Path(tmp_path)))
-    config = app.get_config_file()
-    api_names = {dependency.get("api_name") for dependency in config["dependencies"]}
-    assert {
-        "toggle_inputs",
-        "combined_search",
-        "combined_search_v2",
-        "get_image_info",
-        "scan_dir",
-    } <= api_names
-    assert "cancel_scan" not in api_names
-
+def test_build_app_exposes_keyframe_endpoints_and_filters():
+    app = build_app(FakeSearchMechanism())
     endpoints = app.get_api_info()["named_endpoints"]
-    assert [item["parameter_name"] for item in endpoints["/toggle_inputs"]["parameters"]] == [
-        "search_type"
-    ]
-    assert [item["parameter_name"] for item in endpoints["/scan_dir"]["parameters"]] == ["path"]
-    assert len(endpoints["/combined_search"]["parameters"]) == 5
-    assert len(endpoints["/combined_search"]["returns"]) == 2
-    assert [item["parameter_name"] for item in endpoints["/combined_search_v2"]["parameters"]] == [
-        "search_type",
-        "text",
-        "image",
-        "top_k",
-        "search_mode",
-        "faiss_nprobe",
-    ]
-    assert len(endpoints["/combined_search_v2"]["returns"]) == 2
+    assert "/search_keyframes" in endpoints
+    assert "/get_keyframe_details" in endpoints
+    assert len(endpoints["/search_keyframes"]["parameters"]) == 11
 
-
-def test_build_app_uses_localhost_layout_with_faiss_controls(tmp_path):
-    app = build_app(FakeSearchMechanism(), str(Path(tmp_path)))
     config = app.get_config_file()
-    components_by_label = {
-        component["props"].get("label"): component
+    labels = {
+        component["props"].get("label")
         for component in config["components"]
         if component.get("props", {}).get("label")
     }
+    assert {
+        "Query",
+        "Language",
+        "Top K",
+        "Collections",
+        "Video ID",
+        "Objects",
+        "Detected objects",
+    } <= labels
 
-    mode = components_by_label["Search mode"]["props"]
-    assert mode["choices"] == [("FAISS ANN", "faiss"), ("Exact", "exact")]
-    assert mode["value"] == "faiss"
-    nprobe = components_by_label["FAISS nprobe"]["props"]
-    assert (nprobe["minimum"], nprobe["maximum"], nprobe["value"]) == (
-        1,
-        64,
-        DEFAULT_FAISS_NPROBE,
-    )
-    accordion = next(
-        component for component in config["components"] if component["type"] == "accordion"
-    )
-    assert accordion["props"]["label"] == "Index maintenance"
-    assert accordion["props"]["open"] is False
-
-
-def test_search_result_state_is_serializable():
-    result = SearchResult("images/a.jpg", 0.75, "caption", "a.jpg")
-    assert result.to_dict() == {
-        "image_path": "images/a.jpg",
-        "score": 0.75,
-        "caption": "caption",
-        "filename": "a.jpg",
+    components_by_label = {
+        component["props"].get("label"): component["props"]
+        for component in config["components"]
+        if component.get("props", {}).get("label")
     }
+    assert components_by_label["Video ID"]["value"] == ""
+    assert components_by_label["Author / Channel"]["value"] == ""
+    assert any(
+        component["props"].get("elem_id") == "app-title" for component in config["components"]
+    )
+    assert "@media (max-width: 600px)" in config["css"]
+
+
+def test_zerogpu_entrypoint_does_not_serialize_controller_instance():
+    assert next(iter(inspect.signature(search_keyframes_gpu).parameters)) == "query"
+    assert "@spaces.GPU" not in inspect.getsource(SearchController.search_keyframes)
+    assert "@spaces.GPU" in inspect.getsource(search_keyframes_gpu)
+
+
+def test_click_and_enter_use_the_same_zerogpu_entrypoint():
+    app = build_app(FakeSearchMechanism())
+    callback_names = [
+        getattr(block_function.fn, "__name__", "") for block_function in app.fns.values()
+    ]
+
+    assert callback_names.count("search_keyframes_gpu") == 2
+    assert "search_keyframes" not in callback_names
+
+
+def test_allowed_file_directory_is_limited_to_keyframes(tmp_path):
+    assert _keyframe_directory(tmp_path) == (tmp_path / "keyframes").resolve()
+
+
+def test_detail_markdown_contains_required_metadata():
+    details = KeyframeDetails(
+        keyframe={
+            "keyframe_id": "V01_001",
+            "video_id": "V01",
+            "collection_id": "C01",
+            "keyframe_no": 1,
+            "frame_idx": 90,
+            "pts_time_sec": 3.0,
+            "fps": 30.0,
+            "width": 1280,
+            "height": 720,
+        },
+        video={
+            "title": "Title",
+            "author": "Alice",
+            "channel_id": "channel",
+            "publish_date_iso": "2024-01-01",
+            "watch_url": "https://example.com/watch?v=1",
+        },
+    )
+    markdown = _detail_markdown(details)
+    for expected in ["V01_001", "Frame index", "00:00:03.000", "30", "1280 x 720"]:
+        assert expected in markdown
+    assert "t=3s" in markdown
+    assert 'target="_blank"' in markdown
+    assert 'rel="noopener noreferrer"' in markdown
+
+
+def test_timestamp_and_search_result_serialization():
+    assert _timestamp(3661.125) == "01:01:01.125"
+    result = SearchResult(
+        0,
+        "V01_001",
+        "V01",
+        "C01",
+        1,
+        "/data/keyframes/C01/V01/001.jpg",
+        "keyframes/C01/V01/001.jpg",
+        0.75,
+        3.0,
+        90,
+        30.0,
+        1280,
+        720,
+        "Title",
+    )
+    assert result.to_dict()["keyframe_id"] == "V01_001"

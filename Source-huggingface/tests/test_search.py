@@ -1,143 +1,199 @@
-import json
+import sqlite3
 from pathlib import Path
-from threading import Event
 
+import faiss
 import numpy as np
-import pandas as pd
 import pytest
 from clusterer import ImageIndexer
-from PIL import Image
+from schemas import PreparedQuery, SearchFilters
 
-from db import ScanCancelled, SearchMechanism
+from db import SearchMechanism
 
 
 class FakeClipSearcher:
-    def __init__(self, query=None, cancel_event=None):
-        self.query = np.asarray(query if query is not None else [[1.0, 0.0]], dtype=np.float32)
-        self.cancel_event = cancel_event
-        self.batch_calls = 0
+    def __init__(self, query=(1.0, 0.0)):
+        self.query = np.asarray([query], dtype=np.float32)
 
     def get_text_features(self, _text):
         return self.query
 
-    def get_image_features(self, _image):
-        return self.query
 
-    def get_image_batch_features(self, images):
-        self.batch_calls += 1
-        if self.cancel_event is not None:
-            self.cancel_event.set()
-        return np.tile(self.query, (len(images), 1))
+class FakeTranslator:
+    def prepare(self, query, requested_language):
+        normalized = " ".join(query.split())
+        if not normalized:
+            raise ValueError("Query text cannot be empty")
+        return PreparedQuery(normalized, normalized, requested_language, "english")
 
 
-def _make_store(tmp_path: Path, *, separator="\t", paths=None, embeddings=None):
-    images_path = tmp_path / "images"
-    index_path = tmp_path / "embed_data"
-    images_path.mkdir()
-    index_path.mkdir()
-    paths = paths or ["a.jpg", "b.png", "c.webp"]
-    for name in ["a.jpg", "b.png", "c.webp"]:
-        Image.new("RGB", (4, 4), "red").save(images_path / name)
-    dataframe = pd.DataFrame({"image_path": paths})
-    dataframe.to_csv(index_path / "df.csv", sep=separator, index=False)
-    vectors = np.asarray(
-        embeddings if embeddings is not None else [[1.0, 0.0], [0.0, 1.0], [-1.0, 0.0]],
-        dtype=np.float32,
+def _make_store(tmp_path: Path) -> SearchMechanism:
+    data_root = tmp_path / "release"
+    image_paths = [
+        "keyframes/C01/V01/001.jpg",
+        "keyframes/C01/V01/002.jpg",
+        "keyframes/C02/V02/001.jpg",
+    ]
+    for relative_path in image_paths:
+        path = data_root / relative_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"jpeg")
+
+    embeddings = np.asarray([[1.0, 0.0], [0.8, 0.6], [0.0, 1.0]], dtype=np.float32)
+    embeddings_file = tmp_path / "embeddings.npy"
+    np.save(embeddings_file, embeddings.astype(np.float16))
+    index = faiss.IndexFlatIP(2)
+    index.add(embeddings)
+    index_file = tmp_path / "keyframes.faiss"
+    faiss.write_index(index, str(index_file))
+
+    sqlite_file = tmp_path / "runtime.sqlite"
+    connection = sqlite3.connect(sqlite_file)
+    connection.executescript(
+        """
+        CREATE TABLE videos (
+            video_id TEXT PRIMARY KEY, collection_id TEXT, title TEXT, author TEXT,
+            channel_id TEXT, channel_url TEXT, description TEXT, keywords_json TEXT,
+            duration_sec INTEGER, publish_date_raw TEXT, publish_date_iso TEXT,
+            thumbnail_url TEXT, watch_url TEXT
+        );
+        CREATE TABLE keyframes (
+            vector_id INTEGER PRIMARY KEY, keyframe_id TEXT UNIQUE, video_id TEXT,
+            collection_id TEXT, keyframe_no INTEGER, frame_idx INTEGER,
+            pts_time_sec REAL, fps REAL, width INTEGER, height INTEGER,
+            image_relpath TEXT
+        );
+        CREATE TABLE detections (
+            keyframe_id TEXT, rank INTEGER, entity TEXT, class_mid TEXT,
+            class_label INTEGER, score REAL, ymin REAL, xmin REAL, ymax REAL, xmax REAL
+        );
+        """
     )
-    np.save(index_path / "df_image_embeds.npy", vectors)
-    captions_path = tmp_path / "captions.json"
-    captions_path.write_text(json.dumps({"a.jpg": "red item"}), encoding="utf-8")
-    store = SearchMechanism(
+    connection.executemany(
+        "INSERT INTO videos VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        [
+            (
+                "V01",
+                "C01",
+                "First video",
+                "Alice",
+                "channel-1",
+                "",
+                "description",
+                "[]",
+                60,
+                "01/01/2024",
+                "2024-01-01",
+                "",
+                "https://example.com/watch?v=1",
+            ),
+            (
+                "V02",
+                "C02",
+                "Second video",
+                "Bob",
+                "channel-2",
+                "",
+                "",
+                "[]",
+                90,
+                "01/02/2024",
+                "2024-02-01",
+                "",
+                "https://example.com/watch?v=2",
+            ),
+        ],
+    )
+    connection.executemany(
+        "INSERT INTO keyframes VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+        [
+            (0, "V01_001", "V01", "C01", 1, 30, 1.0, 30.0, 640, 360, image_paths[0]),
+            (1, "V01_002", "V01", "C01", 2, 60, 2.0, 30.0, 640, 360, image_paths[1]),
+            (2, "V02_001", "V02", "C02", 1, 90, 3.0, 30.0, 1280, 720, image_paths[2]),
+        ],
+    )
+    connection.executemany(
+        "INSERT INTO detections VALUES (?,?,?,?,?,?,?,?,?,?)",
+        [
+            ("V01_001", 1, "Person", "/m/person", 1, 0.9, 0.1, 0.1, 0.9, 0.9),
+            ("V01_002", 1, "Car", "/m/car", 2, 0.8, 0.2, 0.2, 0.8, 0.8),
+            ("V01_002", 2, "Person", "/m/person", 1, 0.7, 0.1, 0.1, 0.9, 0.9),
+            ("V02_001", 1, "Car", "/m/car", 2, 0.4, 0.2, 0.2, 0.8, 0.8),
+        ],
+    )
+    connection.commit()
+    connection.close()
+
+    return SearchMechanism(
         FakeClipSearcher(),
-        ImageIndexer(index_path),
-        str(images_path),
-        captions_path,
-    )
-    return store, images_path, index_path
-
-
-@pytest.mark.parametrize("separator", ["\t", ","])
-def test_exact_search_is_vectorized_and_sorted(tmp_path, separator):
-    store, _images, _index = _make_store(tmp_path, separator=separator)
-    results = store.query_by_text("red", top_k=2)
-    assert [result.filename for result in results] == ["a.jpg", "b.png"]
-    assert results[0].score == pytest.approx(1.0)
-    assert results[0].caption == "red item"
-
-
-def test_windows_image_paths_resolve_to_dataset(tmp_path):
-    store, images_path, _index = _make_store(
-        tmp_path,
-        paths=[r"C:\dataset\a.jpg", r"C:\dataset\b.png", r"C:\dataset\c.webp"],
-    )
-    assert store.df.iloc[1]["image_path"] == str(images_path / "b.png")
-
-
-def test_row_count_mismatch_is_rejected(tmp_path):
-    with pytest.raises(ValueError, match="row count"):
-        _make_store(tmp_path, paths=["a.jpg", "b.png"])
-
-
-def test_faiss_search_uses_cosine_scores(tmp_path):
-    store, _images, _index = _make_store(tmp_path)
-    results = store.query_by_text(
-        "red",
-        top_k=2,
-        use_cluster_search=True,
-        faiss_nprobe=4,
-    )
-    assert results[0].filename == "a.jpg"
-    assert results[0].score == pytest.approx(1.0)
-
-
-def test_faiss_nprobe_is_clamped_to_ivf_cluster_count(tmp_path):
-    rng = np.random.default_rng(0)
-    vectors = rng.random((1_000, 4), dtype=np.float32)
-    indexer = ImageIndexer(tmp_path)
-    indexer.fit(vectors)
-
-    indexer.predict(vectors, vectors[0], 2, nprobe=999)
-    assert indexer.index.nprobe == indexer.index.nlist
-    indexer.predict(vectors, vectors[0], 2, nprobe=0)
-    assert indexer.index.nprobe == 1
-
-
-def test_cancelled_reindex_keeps_previous_artifacts(tmp_path):
-    cancel_event = Event()
-    store, images_path, index_path = _make_store(tmp_path)
-    store.clip_searcher = FakeClipSearcher(cancel_event=cancel_event)
-    old_dataframe = (index_path / "df.csv").read_bytes()
-    old_embeddings = (index_path / "df_image_embeds.npy").read_bytes()
-
-    with pytest.raises(ScanCancelled):
-        store.scan_directory(images_path, batch_size=1, cancel_event=cancel_event)
-
-    assert (index_path / "df.csv").read_bytes() == old_dataframe
-    assert (index_path / "df_image_embeds.npy").read_bytes() == old_embeddings
-    assert not list(index_path.glob(".reindex-*"))
-
-
-def test_successful_reindex_atomically_installs_v2_artifacts(tmp_path):
-    store, images_path, index_path = _make_store(tmp_path)
-    completed = []
-    count = store.scan_directory(
-        images_path,
-        batch_size=2,
-        progress=lambda current, total: completed.append((current, total)),
+        FakeTranslator(),
+        ImageIndexer(index_file),
+        sqlite_file,
+        embeddings_file,
+        data_root,
     )
 
-    assert count == 3
-    assert completed == [(2, 3), (3, 3)]
-    assert len(pd.read_csv(index_path / "df.csv", sep="\t")) == 3
-    assert np.load(index_path / "df_image_embeds.npy").shape == (3, 2)
-    assert (index_path / ImageIndexer.INDEX_FILENAME).exists()
-    assert (index_path / ImageIndexer.METADATA_FILENAME).exists()
-    assert len(store.query_by_text("red", top_k=2, use_cluster_search=True)) == 2
+
+def test_unfiltered_search_uses_faiss_cosine_order(tmp_path):
+    store = _make_store(tmp_path)
+    outcome = store.search_by_text("red car", top_k=3)
+    assert [result.keyframe_id for result in outcome.results] == [
+        "V01_001",
+        "V01_002",
+        "V02_001",
+    ]
+    assert outcome.results[0].score == pytest.approx(1.0)
+    assert outcome.results[1].score == pytest.approx(0.8)
 
 
-def test_reindex_rejects_paths_outside_configured_dataset(tmp_path):
-    store, _images, _index = _make_store(tmp_path)
-    other = tmp_path / "other"
-    other.mkdir()
-    with pytest.raises(ValueError, match="restricted"):
-        store.scan_directory(other)
+def test_object_filter_selects_candidates_before_exact_cosine(tmp_path):
+    store = _make_store(tmp_path)
+    filters = SearchFilters(object_entities=("Car",), minimum_object_confidence=0.5)
+    outcome = store.search_by_text("red car", top_k=3, filters=filters)
+    assert [result.keyframe_id for result in outcome.results] == ["V01_002"]
+    assert outcome.results[0].score == pytest.approx(0.8, abs=0.001)
+
+
+def test_all_object_filter_and_metadata_filters_are_strict(tmp_path):
+    store = _make_store(tmp_path)
+    filters = SearchFilters(
+        collections=("C01",),
+        object_entities=("Car", "Person"),
+        object_match_mode="all",
+        minimum_object_confidence=0.5,
+        author="Alice",
+        publish_date_from="2024-01-01",
+        publish_date_to="2024-01-31",
+    )
+    outcome = store.search_by_text("query", top_k=100, filters=filters)
+    assert [result.keyframe_id for result in outcome.results] == ["V01_002"]
+
+
+def test_filter_options_and_keyframe_details(tmp_path):
+    store = _make_store(tmp_path)
+    assert store.filter_options() == {
+        "collections": ["C01", "C02"],
+        "videos": ["V01", "V02"],
+        "objects": ["Car", "Person"],
+        "authors": ["Alice", "Bob"],
+    }
+    details = store.get_keyframe_details("V01_002")
+    assert details.keyframe["fps"] == 30.0
+    assert details.keyframe["frame_idx"] == 60
+    assert details.video["title"] == "First video"
+    assert [row["entity"] for row in details.detections] == ["Car", "Person"]
+
+
+@pytest.mark.parametrize("top_k", [0, 101])
+def test_top_k_is_limited_to_public_contract(tmp_path, top_k):
+    store = _make_store(tmp_path)
+    with pytest.raises(ValueError, match="top_k"):
+        store.search_by_text("query", top_k=top_k)
+
+
+def test_invalid_date_filter_is_rejected(tmp_path):
+    store = _make_store(tmp_path)
+    with pytest.raises(ValueError, match="YYYY-MM-DD"):
+        store.search_by_text(
+            "query",
+            filters=SearchFilters(publish_date_from="01/01/2024"),
+        )

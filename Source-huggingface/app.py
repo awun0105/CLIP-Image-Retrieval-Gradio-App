@@ -1,19 +1,17 @@
-"""Standalone Gradio entrypoint for the Hugging Face Space."""
+"""Standalone Gradio application for filtered keyframe retrieval."""
 
 from __future__ import annotations
 
+import html
 import logging
 import os
 from pathlib import Path
-from threading import Event, Lock
 
 try:
     import spaces
 except ImportError:
 
     class _LocalSpaces:
-        """Keep the app runnable outside Hugging Face ZeroGPU."""
-
         @staticmethod
         def GPU(function=None, **_kwargs):
             if function is not None:
@@ -29,325 +27,451 @@ except ImportError:
 import gradio as gr
 from clip import CLIPSearcher
 from clusterer import ImageIndexer
-from database_utils import download_and_prepare_dataset
+from database_utils import RuntimePaths, prepare_runtime
+from schemas import SearchFilters
+from translation import QueryTranslator
 
-from db import ScanCancelled, SearchMechanism
-
-os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
+from db import SearchMechanism
 
 logger = logging.getLogger(__name__)
-DEFAULT_PROGRESS = gr.Progress()
-DEFAULT_FAISS_NPROBE = 8
+
+APP_CSS = """
+body { overflow-y: auto !important; }
+@media (max-width: 600px) {
+    #app-title { margin-top: 3.5rem; }
+}
+"""
 
 
-def _use_faiss(search_mode: str) -> bool:
-    normalized = str(search_mode).strip().lower()
-    if normalized == "faiss":
-        return True
-    if normalized == "exact":
-        return False
-    raise ValueError(f"Unsupported search mode: {search_mode}")
+def _timestamp(seconds: float) -> str:
+    total_milliseconds = max(0, round(float(seconds) * 1000))
+    hours, remainder = divmod(total_milliseconds, 3_600_000)
+    minutes, remainder = divmod(remainder, 60_000)
+    secs, milliseconds = divmod(remainder, 1000)
+    return f"{hours:02d}:{minutes:02d}:{secs:02d}.{milliseconds:03d}"
 
 
-class _ScanController:
-    def __init__(self) -> None:
-        self.cancel_event = Event()
-        self._lock = Lock()
-        self._running = False
-
-    def begin(self) -> None:
-        with self._lock:
-            if self._running:
-                raise RuntimeError("A reindex operation is already running")
-            self.cancel_event.clear()
-            self._running = True
-
-    def finish(self) -> None:
-        with self._lock:
-            self._running = False
-
-    def cancel(self) -> bool:
-        with self._lock:
-            if not self._running:
-                return False
-            self.cancel_event.set()
-            return True
+def _watch_at(url: str, seconds: float) -> str:
+    if not url:
+        return ""
+    separator = "&" if "?" in url else "?"
+    return f"{url}{separator}t={max(0, int(seconds))}s"
 
 
-def build_app(
-    search_mechanism: SearchMechanism,
-    images_path: str,
-    *,
-    scan_batch_size: int = 16,
-) -> gr.Blocks:
-    """Build the UI while retaining the V1 public Gradio endpoint names."""
-    scan_controller = _ScanController()
+def _keyframe_directory(data_root: Path) -> Path:
+    return (data_root / "keyframes").resolve()
 
-    def _resolve_results(results) -> tuple[list[tuple[str, str]], list[dict], str]:
-        gallery_items: list[tuple[str, str]] = []
-        rows: list[dict] = []
-        for result in results:
-            if not Path(result.image_path).is_file():
-                logger.warning("Search result image does not exist: %s", result.image_path)
-                continue
-            gallery_items.append((result.image_path, result.caption or result.filename or ""))
-            rows.append(result.to_dict())
-        return gallery_items, rows, f"Found {len(gallery_items)} results"
 
-    def search_by_text(text: str, top_k: int, search_mode: str, faiss_nprobe: int):
-        if not text or not text.strip():
-            return [], [], "Error: please enter a text query"
-        try:
-            use_cluster_search = _use_faiss(search_mode)
-            results = search_mechanism.query_by_text(
-                text,
-                int(top_k),
-                use_cluster_search,
-                int(faiss_nprobe) if use_cluster_search else None,
+def _detail_markdown(details) -> str:
+    keyframe = details.keyframe
+    video = details.video
+    watch_url = _watch_at(str(video.get("watch_url") or ""), keyframe["pts_time_sec"])
+    watch_link = (
+        f'<a href="{html.escape(watch_url, quote=True)}" target="_blank" '
+        'rel="noopener noreferrer">Open video</a>'
+        if watch_url
+        else "N/A"
+    )
+    values = {
+        "Keyframe ID": keyframe["keyframe_id"],
+        "Video ID": keyframe["video_id"],
+        "Collection": keyframe["collection_id"],
+        "Keyframe no.": keyframe["keyframe_no"],
+        "Frame index": keyframe["frame_idx"],
+        "Timestamp": _timestamp(keyframe["pts_time_sec"]),
+        "FPS": f"{float(keyframe['fps']):.4g}",
+        "Resolution": f"{keyframe['width']} x {keyframe['height']}",
+        "Title": video.get("title") or "N/A",
+        "Author": video.get("author") or "N/A",
+        "Channel": video.get("channel_id") or "N/A",
+        "Published": video.get("publish_date_iso") or video.get("publish_date_raw") or "N/A",
+    }
+    rows = [f"| {label} | {html.escape(str(value))} |" for label, value in values.items()]
+    return "\n".join(["| Field | Value |", "|---|---|", *rows, f"| Source | {watch_link} |"])
+
+
+def _detection_rows(details) -> list[list]:
+    return [
+        [
+            row["entity"],
+            round(float(row["score"]), 4),
+            row["class_mid"],
+            row["class_label"],
+            round(float(row["ymin"]), 4),
+            round(float(row["xmin"]), 4),
+            round(float(row["ymax"]), 4),
+            round(float(row["xmax"]), 4),
+        ]
+        for row in details.detections
+    ]
+
+
+class SearchController:
+    """UI callbacks bound to one immutable runtime release."""
+
+    def __init__(self, search_mechanism: SearchMechanism, page_size: int) -> None:
+        self.search_mechanism = search_mechanism
+        self.page_size = page_size
+
+    def page_payload(self, rows: list[dict], page: int):
+        rows = rows or []
+        total_pages = max(1, (len(rows) + self.page_size - 1) // self.page_size)
+        page = max(0, min(int(page), total_pages - 1))
+        start = page * self.page_size
+        page_rows = rows[start : start + self.page_size]
+        gallery = [
+            (
+                row["image_path"],
+                f"{row['keyframe_id']} | {_timestamp(row['pts_time_sec'])} | {row['score']:.4f}",
             )
-            return _resolve_results(results)
-        except Exception as exc:
-            logger.exception("Text search failed")
-            return [], [], f"Error: {exc}"
-
-    def search_by_image(image, top_k: int, search_mode: str, faiss_nprobe: int):
-        if image is None:
-            return [], [], "Error: please upload an image"
-        try:
-            use_cluster_search = _use_faiss(search_mode)
-            results = search_mechanism.query_by_image(
-                image,
-                int(top_k),
-                use_cluster_search,
-                int(faiss_nprobe) if use_cluster_search else None,
-            )
-            return _resolve_results(results)
-        except Exception as exc:
-            logger.exception("Image search failed")
-            return [], [], f"Error: {exc}"
-
-    @spaces.GPU(duration=120)
-    def combined_search(search_type, text, image, top_k, search_mode, faiss_nprobe):
-        if search_type == "Text":
-            return search_by_text(text, top_k, search_mode, faiss_nprobe)
-        return search_by_image(image, top_k, search_mode, faiss_nprobe)
-
-    @spaces.GPU(duration=120)
-    def legacy_combined_search(search_type, text, image, top_k, use_cluster_search):
-        search_mode = "faiss" if use_cluster_search else "exact"
-        if search_type == "Text":
-            return search_by_text(text, top_k, search_mode, DEFAULT_FAISS_NPROBE)
-        return search_by_image(image, top_k, search_mode, DEFAULT_FAISS_NPROBE)
-
-    def get_image_info(evt: gr.SelectData, rows):
-        if not rows or evt.index is None:
-            return "Select an image to view details", ""
-        index = int(evt.index)
-        if index < 0 or index >= len(rows):
-            return "Select an image to view details", ""
-        row = rows[index]
-        score = row.get("score")
-        score_text = f"{float(score):.6f}" if score is not None else "N/A"
-        return score_text, row.get("caption") or "No caption available"
-
-    @spaces.GPU(duration=300)
-    def scan_dir(path: str, progress=DEFAULT_PROGRESS):
-        try:
-            scan_controller.begin()
-        except RuntimeError as exc:
-            gr.Warning(str(exc))
-            return images_path
-
-        try:
-            count = search_mechanism.scan_directory(
-                Path(path),
-                batch_size=scan_batch_size,
-                cancel_event=scan_controller.cancel_event,
-                progress=lambda completed, total: progress(
-                    completed / total,
-                    desc=f"Indexed {completed}/{total} images",
-                ),
-            )
-        except ScanCancelled:
-            gr.Info("Scan cancelled. The previous index is still active.")
-            return images_path
-        except Exception as exc:
-            logger.exception("Directory scan failed")
-            gr.Warning(f"Scan failed: {exc}")
-            return images_path
-        finally:
-            scan_controller.finish()
-
-        gr.Info(f"Indexed {count} images successfully.")
-        return images_path
-
-    def cancel_scan():
-        if scan_controller.cancel():
-            return "Cancellation requested. Finishing the current batch..."
-        return "No scan is currently running"
-
-    def toggle_inputs(search_type):
+            for row in page_rows
+            if Path(row["image_path"]).is_file()
+        ]
+        label = f"Page {page + 1} / {total_pages} | {len(rows)} results"
         return (
-            gr.update(visible=search_type == "Text"),
-            gr.update(visible=search_type == "Image"),
+            gallery,
+            page,
+            label,
+            gr.update(interactive=page > 0),
+            gr.update(interactive=page + 1 < total_pages),
         )
 
-    def toggle_faiss_controls(search_mode):
-        return gr.update(interactive=_use_faiss(search_mode))
+    def search_keyframes(
+        self,
+        query,
+        top_k,
+        query_language,
+        collections,
+        video_id,
+        object_entities,
+        object_match_mode,
+        minimum_object_confidence,
+        author,
+        publish_date_from,
+        publish_date_to,
+    ):
+        try:
+            filters = SearchFilters(
+                collections=tuple(collections or ()),
+                video_id=video_id or None,
+                object_entities=tuple(object_entities or ()),
+                object_match_mode=str(object_match_mode).lower(),
+                minimum_object_confidence=float(minimum_object_confidence),
+                author=author or None,
+                publish_date_from=publish_date_from or None,
+                publish_date_to=publish_date_to or None,
+            )
+            outcome = self.search_mechanism.search_by_text(
+                query,
+                int(top_k),
+                str(query_language).lower(),
+                filters,
+            )
+            rows = [result.to_dict() for result in outcome.results]
+            gallery, page, label, previous_update, next_update = self.page_payload(rows, 0)
+            query_info = f"CLIP query: {outcome.query.clip_query}"
+            if outcome.query.translated:
+                query_info = f"Translated query: {outcome.query.clip_query}"
+            if outcome.query.warning:
+                query_info = f"{query_info} | {outcome.query.warning}"
+            status = f"Found {len(rows)} results | {query_info}"
+            return (
+                gallery,
+                rows,
+                page,
+                status,
+                label,
+                previous_update,
+                next_update,
+                None,
+                "Select a keyframe to view metadata",
+                [],
+            )
+        except Exception as exc:
+            logger.exception("Keyframe search failed")
+            return (
+                [],
+                [],
+                0,
+                f"Error: {exc}",
+                "Page 1 / 1 | 0 results",
+                gr.update(interactive=False),
+                gr.update(interactive=False),
+                None,
+                "Select a keyframe to view metadata",
+                [],
+            )
 
-    with gr.Blocks(css="body { overflow-y: auto !important; }") as webui:
-        gr.Markdown("## CLIP Image Search App (v2 - FAISS + HF Dataset)")
+    def previous_page(self, rows, page):
+        return self.page_payload(rows, int(page) - 1)
+
+    def next_page(self, rows, page):
+        return self.page_payload(rows, int(page) + 1)
+
+    def select_keyframe(self, rows, page, evt: gr.SelectData):
+        if not rows or evt.index is None:
+            return None, "Select a keyframe to view metadata", []
+        local_index = int(evt.index[0] if isinstance(evt.index, tuple) else evt.index)
+        global_index = int(page) * self.page_size + local_index
+        if global_index < 0 or global_index >= len(rows):
+            return None, "Selected result is no longer available", []
+        row = rows[global_index]
+        details = self.search_mechanism.get_keyframe_details(row["keyframe_id"])
+        return row["image_path"], _detail_markdown(details), _detection_rows(details)
+
+    def details_api(self, keyframe_id: str):
+        details = self.search_mechanism.get_keyframe_details(keyframe_id)
+        return {
+            "keyframe": details.keyframe,
+            "video": details.video,
+            "detections": list(details.detections),
+        }
+
+
+_search_controller: SearchController | None = None
+_keyframes_root: Path | None = None
+
+
+@spaces.GPU(duration=120)
+def search_keyframes_gpu(
+    query,
+    top_k,
+    query_language,
+    collections,
+    video_id,
+    object_entities,
+    object_match_mode,
+    minimum_object_confidence,
+    author,
+    publish_date_from,
+    publish_date_to,
+):
+    """Run CLIP retrieval without passing unpicklable runtime state to ZeroGPU."""
+    if _search_controller is None:
+        raise RuntimeError("Search controller has not been initialized")
+    return _search_controller.search_keyframes(
+        query,
+        top_k,
+        query_language,
+        collections,
+        video_id,
+        object_entities,
+        object_match_mode,
+        minimum_object_confidence,
+        author,
+        publish_date_from,
+        publish_date_to,
+    )
+
+
+def build_app(search_mechanism: SearchMechanism, *, page_size: int = 20) -> gr.Blocks:
+    """Construct the Gradio UI and bind it to a prepared search mechanism."""
+    global _search_controller
+
+    options = search_mechanism.filter_options()
+    controller = SearchController(search_mechanism, page_size)
+    _search_controller = controller
+
+    with gr.Blocks(css=APP_CSS) as webui:
+        gr.Markdown("## AIoU Keyframe Retrieval", elem_id="app-title")
         results_state = gr.State([])
+        page_state = gr.State(0)
 
-        with gr.Column():
-            with gr.Row(equal_height=True):
-                search_type = gr.Radio(
-                    choices=["Text", "Image"],
-                    label="Search by",
-                    value="Text",
-                )
-                top_k_slider = gr.Slider(
-                    label="Top K",
-                    minimum=1,
-                    maximum=50,
-                    step=1,
-                    value=5,
-                )
-                search_mode = gr.Dropdown(
-                    choices=[
-                        ("FAISS ANN", "faiss"),
-                        ("Exact", "exact"),
-                    ],
-                    label="Search mode",
-                    value="faiss",
-                )
-                faiss_nprobe = gr.Slider(
-                    label="FAISS nprobe",
-                    minimum=1,
-                    maximum=64,
-                    step=1,
-                    value=DEFAULT_FAISS_NPROBE,
-                )
+        with gr.Row(equal_height=True):
+            query = gr.Textbox(
+                label="Query",
+                placeholder="Describe the keyframe you want to find",
+                scale=5,
+            )
+            query_language = gr.Dropdown(
+                label="Language",
+                choices=[("Auto", "auto"), ("English", "english"), ("Vietnamese", "vietnamese")],
+                value="auto",
+                scale=1,
+            )
+            top_k = gr.Slider(label="Top K", minimum=1, maximum=100, step=1, value=20, scale=2)
 
-            with gr.Column(visible=True) as text_input:
-                text = gr.Textbox(label="Text", placeholder="Enter text to search")
-            with gr.Column(visible=False) as image_input:
-                image = gr.Image(label="Image", type="pil")
-
-            search_type.change(
-                toggle_inputs,
-                inputs=[search_type],
-                outputs=[text_input, image_input],
-                api_name="toggle_inputs",
-            )
-            search_mode.change(
-                toggle_faiss_controls,
-                inputs=[search_mode],
-                outputs=[faiss_nprobe],
-                queue=False,
-                api_name=False,
-            )
-
-            search_btn = gr.Button("Search", variant="primary")
-            status = gr.Textbox(label="Status", value="Ready")
-            gallery = gr.Gallery(
-                label="Results",
-                show_label=True,
-                columns=5,
-                rows=2,
-                height="auto",
-                preview=False,
-            )
-            image_info_score = gr.Textbox(
-                label="Similarity Score",
-                value="Select an image to view details",
-            )
-            image_info_caption = gr.Textbox(
-                label="Caption",
-                value="Select an image to view details",
-            )
-
-        with gr.Accordion("Index maintenance", open=False):
-            path_input = gr.Textbox(
-                label="Path",
-                info="Dataset image directory",
-                value=images_path,
-            )
+        with gr.Accordion("Filters", open=False):
             with gr.Row():
-                scan_dir_btn = gr.Button("Scan Directory", variant="primary")
-                cancel_scan_btn = gr.Button("Cancel", variant="stop")
+                collections = gr.Dropdown(
+                    label="Collections",
+                    choices=options["collections"],
+                    multiselect=True,
+                )
+                video_id = gr.Dropdown(
+                    label="Video ID",
+                    choices=[("All videos", ""), *options["videos"]],
+                    value="",
+                    filterable=True,
+                )
+                author = gr.Dropdown(
+                    label="Author / Channel",
+                    choices=[("All authors", ""), *options["authors"]],
+                    value="",
+                    filterable=True,
+                )
+            with gr.Row():
+                object_entities = gr.Dropdown(
+                    label="Objects",
+                    choices=options["objects"],
+                    multiselect=True,
+                    filterable=True,
+                    scale=4,
+                )
+                object_match_mode = gr.Radio(
+                    label="Object match",
+                    choices=[("Any", "any"), ("All", "all")],
+                    value="any",
+                    scale=1,
+                )
+                minimum_object_confidence = gr.Slider(
+                    label="Minimum confidence",
+                    minimum=0.3,
+                    maximum=1.0,
+                    step=0.05,
+                    value=0.3,
+                    scale=2,
+                )
+            with gr.Row():
+                publish_date_from = gr.Textbox(label="Published from", placeholder="YYYY-MM-DD")
+                publish_date_to = gr.Textbox(label="Published to", placeholder="YYYY-MM-DD")
+
+        search_button = gr.Button("Search", variant="primary")
+        status = gr.Textbox(label="Status", value="Ready", interactive=False)
+        gallery = gr.Gallery(
+            label="Keyframes",
+            show_label=True,
+            columns=5,
+            rows=4,
+            height="auto",
+            preview=False,
+        )
+        with gr.Row():
+            previous_button = gr.Button("Previous", interactive=False)
+            page_label = gr.Textbox(
+                value="Page 1 / 1 | 0 results",
+                show_label=False,
+                interactive=False,
+            )
+            next_button = gr.Button("Next", interactive=False)
+
+        with gr.Row(equal_height=False):
+            with gr.Column(scale=2):
+                detail_image = gr.Image(label="Selected keyframe", interactive=False)
+            with gr.Column(scale=3):
+                detail_metadata = gr.Markdown("Select a keyframe to view metadata")
+        detections = gr.Dataframe(
+            headers=["Object", "Score", "MID", "Label", "ymin", "xmin", "ymax", "xmax"],
+            datatype=["str", "number", "str", "number", "number", "number", "number", "number"],
+            label="Detected objects",
+            interactive=False,
+        )
 
         with gr.Column(visible=False):
-            legacy_use_cluster_search = gr.Checkbox(
-                label="Use FAISS cluster search",
-                value=False,
-            )
-            legacy_search_btn = gr.Button("Legacy search")
+            api_keyframe_id = gr.Textbox()
+            api_details = gr.JSON()
+            api_details_button = gr.Button("Metadata API")
 
-        search_btn.click(
-            fn=combined_search,
-            inputs=[
-                search_type,
-                text,
-                image,
-                top_k_slider,
-                search_mode,
-                faiss_nprobe,
-            ],
-            outputs=[gallery, results_state, status],
-            api_name="combined_search_v2",
+        search_outputs = [
+            gallery,
+            results_state,
+            page_state,
+            status,
+            page_label,
+            previous_button,
+            next_button,
+            detail_image,
+            detail_metadata,
+            detections,
+        ]
+        search_inputs = [
+            query,
+            top_k,
+            query_language,
+            collections,
+            video_id,
+            object_entities,
+            object_match_mode,
+            minimum_object_confidence,
+            author,
+            publish_date_from,
+            publish_date_to,
+        ]
+        search_button.click(
+            fn=search_keyframes_gpu,
+            inputs=search_inputs,
+            outputs=search_outputs,
+            api_name="search_keyframes",
         )
-        legacy_search_btn.click(
-            fn=legacy_combined_search,
-            inputs=[
-                search_type,
-                text,
-                image,
-                top_k_slider,
-                legacy_use_cluster_search,
-            ],
-            outputs=[gallery, results_state, status],
-            api_name="combined_search",
+        query.submit(
+            fn=search_keyframes_gpu,
+            inputs=search_inputs,
+            outputs=search_outputs,
+            api_name=False,
         )
-        gallery.select(
-            fn=get_image_info,
-            inputs=[results_state],
-            outputs=[image_info_score, image_info_caption],
-            api_name="get_image_info",
-        )
-        scan_event = scan_dir_btn.click(
-            fn=scan_dir,
-            inputs=[path_input],
-            outputs=[path_input],
-            api_name="scan_dir",
-            concurrency_limit=1,
-            concurrency_id="dataset-reindex",
-        )
-        cancel_scan_btn.click(
-            fn=cancel_scan,
-            outputs=[status],
-            cancels=[scan_event],
+        previous_button.click(
+            controller.previous_page,
+            inputs=[results_state, page_state],
+            outputs=[gallery, page_state, page_label, previous_button, next_button],
             queue=False,
             api_name=False,
+        )
+        next_button.click(
+            controller.next_page,
+            inputs=[results_state, page_state],
+            outputs=[gallery, page_state, page_label, previous_button, next_button],
+            queue=False,
+            api_name=False,
+        )
+        gallery.select(
+            controller.select_keyframe,
+            inputs=[results_state, page_state],
+            outputs=[detail_image, detail_metadata, detections],
+            api_name=False,
+        )
+        api_details_button.click(
+            controller.details_api,
+            inputs=[api_keyframe_id],
+            outputs=[api_details],
+            api_name="get_keyframe_details",
         )
 
     return webui
 
 
-def create_app() -> gr.Blocks:
-    env = download_and_prepare_dataset()
-    clip_searcher = CLIPSearcher(model_id=env["MODEL_ID"])
-    image_indexer = ImageIndexer(env["INDEX_PATH"])
-    search_mechanism = SearchMechanism(
-        clip_searcher=clip_searcher,
-        image_indexer=image_indexer,
-        default_images_path=env["DEFAULT_IMAGES_PATH"],
-        captions_path=env["CAPTIONS_PATH"],
+def create_search_mechanism(runtime: RuntimePaths) -> SearchMechanism:
+    environment = runtime.environment
+    clip_searcher = CLIPSearcher(
+        model_id=environment["MODEL_ID"],
+        revision=environment["MODEL_REVISION"],
     )
+    if os.environ.get("SPACE_ID"):
+        clip_searcher.load()
+    return SearchMechanism(
+        clip_searcher=clip_searcher,
+        translator=QueryTranslator(
+            model_id=environment["TRANSLATION_MODEL_ID"],
+            revision=environment["TRANSLATION_MODEL_REVISION"],
+        ),
+        image_indexer=ImageIndexer(
+            runtime.index_file,
+            nprobe=int(environment["FAISS_NPROBE"]),
+        ),
+        sqlite_file=runtime.sqlite_file,
+        embeddings_file=runtime.embeddings_file,
+        data_root=runtime.data_root,
+    )
+
+
+def create_app() -> gr.Blocks:
+    global _keyframes_root
+
+    runtime = prepare_runtime()
+    _keyframes_root = _keyframe_directory(runtime.data_root)
+    search_mechanism = create_search_mechanism(runtime)
     return build_app(
         search_mechanism,
-        env["DEFAULT_IMAGES_PATH"],
-        scan_batch_size=int(env["SCAN_BATCH_SIZE"]),
+        page_size=int(runtime.environment["RESULTS_PER_PAGE"]),
     )
 
 
@@ -357,10 +481,14 @@ def main() -> None:
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
     webui = create_app()
-    webui.queue()
+    if _keyframes_root is None:
+        raise RuntimeError("Keyframe data root has not been initialized")
+    webui.queue(default_concurrency_limit=2)
     webui.launch(
         server_name="0.0.0.0",
         server_port=int(os.environ.get("PORT", "7860")),
+        ssr_mode=False,
+        allowed_paths=[str(_keyframes_root)],
     )
 
 

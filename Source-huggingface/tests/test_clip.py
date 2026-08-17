@@ -47,6 +47,10 @@ def test_model_load_uses_resolved_device_and_eval():
         searcher._ensure_loaded()
     model.to.assert_called_once_with("cpu")
     model.eval.assert_called_once_with()
+    model_class.from_pretrained.assert_called_once_with(
+        "openai/clip-vit-base-patch32",
+        revision="3d74acf9a28c67741b2f4f2ea7635f0aaf6f0268",
+    )
     assert searcher.is_loaded
 
 
@@ -62,6 +66,7 @@ def test_text_features_are_truncated_and_return_float32():
     )
     assert result.dtype == np.float32
     assert result.shape == (1, 4)
+    assert np.linalg.norm(result[0]) == pytest.approx(1.0)
 
 
 def test_empty_image_batch_does_not_load_model():
